@@ -97,6 +97,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.app.metadataCache.on("changed", () => this.scheduleScan())
 		);
 		this.registerEvent(
+			this.app.vault.on("create", () => this.scheduleScan())
+		);
+		this.registerEvent(
 			this.app.vault.on("delete", () => this.scheduleScan())
 		);
 		this.registerEvent(
@@ -118,25 +121,34 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.vaultEntries = [];
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
+			const noteName = file.basename;
+			const lower = noteName.toLowerCase();
+			if (!seen.has(lower) && !this.manualLookup.has(lower)) {
+				seen.add(lower);
+				this.vaultEntries.push({
+					keyword: noteName,
+					target: noteName,
+				});
+			}
+
 			const cache = this.app.metadataCache.getFileCache(file);
 			if (!cache?.links) continue;
 
 			for (const link of cache.links) {
 				const raw = link.link.split("#")[0]!.split("^")[0]!.trim();
 				if (!raw) continue;
-				const noteName = raw.includes("/")
+				const linkName = raw.includes("/")
 					? raw.split("/").pop()!
 					: raw;
-				const lower = noteName.toLowerCase();
-				if (seen.has(lower)) continue;
-				seen.add(lower);
+				const linkLower = linkName.toLowerCase();
+				if (seen.has(linkLower) || this.manualLookup.has(linkLower))
+					continue;
+				seen.add(linkLower);
 
-				if (!this.manualLookup.has(lower)) {
-					this.vaultEntries.push({
-						keyword: noteName,
-						target: noteName,
-					});
-				}
+				this.vaultEntries.push({
+					keyword: linkName,
+					target: linkName,
+				});
 			}
 		}
 
@@ -387,7 +399,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Auto-detect vault links")
 			.setDesc(
-				"Automatically add all wikilinked note names from the vault as keywords."
+				"Automatically use all note names and existing wikilinks from the vault as keywords."
 			)
 			.addToggle((toggle) => {
 				toggle
