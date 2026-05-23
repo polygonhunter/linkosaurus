@@ -1,5 +1,6 @@
 import { Plugin, PluginSettingTab, App, Setting } from "obsidian";
 import { keymap, EditorView } from "@codemirror/view";
+import { EditorState, Transaction } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
 interface AutoLinkSettings {
@@ -51,9 +52,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					run: (view: EditorView) => this.handleSpace(view),
 				},
 			]),
-			EditorView.inputHandler.of(
-				(view: EditorView, from: number, to: number, text: string) =>
-					this.handleInput(view, from, to, text)
+			EditorState.transactionFilter.of((tr: Transaction) =>
+				this.filterTransaction(tr)
 			),
 		]);
 
@@ -278,7 +278,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					matchedKeywordLower: kwLower,
 					timer: window.setTimeout(
 						() => (this.pendingUndo = null),
-						1500
+						5000
 					),
 				};
 			}
@@ -289,40 +289,62 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return false;
 	}
 
-	private handleInput(
-		view: EditorView,
-		from: number,
-		_to: number,
-		text: string
-	): boolean {
+	private filterTransaction(tr: Transaction): any {
 		const pending = this.pendingUndo;
-		if (!pending) return false;
+		if (!pending || !tr.docChanged) return tr;
 
-		if (text.length !== 1 || from !== pending.to) {
+		let insertedText = "";
+		let insertAt = -1;
+		tr.changes.iterChanges(
+			(
+				fromA: number,
+				toA: number,
+				_fromB: number,
+				_toB: number,
+				inserted
+			) => {
+				if (
+					insertAt === -1 &&
+					toA === fromA &&
+					Math.abs(fromA - pending.to) <= 1
+				) {
+					insertedText = inserted.toString();
+					insertAt = fromA;
+				}
+			}
+		);
+
+		if (!insertedText || insertAt === -1) {
 			this.clearPendingUndo();
-			return false;
+			return tr;
 		}
 
+		const firstChar = insertedText.charAt(0);
 		const prefix =
-			pending.matchedKeywordLower + " " + text.toLowerCase();
+			pending.matchedKeywordLower +
+			" " +
+			firstChar.toLowerCase();
 		const couldGrow = this.entries.some((e) =>
 			e.keyword.toLowerCase().startsWith(prefix)
 		);
 
 		if (!couldGrow) {
 			this.clearPendingUndo();
-			return false;
+			return tr;
 		}
 
 		this.clearPendingUndo();
-		const restoreText = pending.typedText + " " + text;
-		view.dispatch({
-			changes: { from: pending.from, to: from, insert: restoreText },
+		const restoreText = pending.typedText + " " + insertedText;
+		return {
+			changes: {
+				from: pending.from,
+				to: pending.to,
+				insert: restoreText,
+			},
 			selection: {
 				anchor: pending.from + restoreText.length,
 			},
-		});
-		return true;
+		};
 	}
 
 	private isInCodeContext(
