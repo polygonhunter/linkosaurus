@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting } from "obsidian";
 import { keymap, EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
@@ -17,14 +17,19 @@ interface KeywordEntry {
 	target: string;
 }
 
+function sanitize(text: string): string {
+	return text.replace(/\]\]/g, "");
+}
+
 export default class AutoLinkKeywordsPlugin extends Plugin {
-	settings: AutoLinkSettings = DEFAULT_SETTINGS;
+	settings: AutoLinkSettings = { ...DEFAULT_SETTINGS };
 	private entries: KeywordEntry[] = [];
 	private lookupMap = new Map<string, string>();
 	private manualEntries: KeywordEntry[] = [];
 	private manualLookup = new Map<string, string>();
 	private vaultEntries: KeywordEntry[] = [];
 	private scanTimer: number | null = null;
+	private saveTimer: number | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -50,9 +55,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					const line = editor.getLine(cursor.line);
 					let start = cursor.ch;
 					let end = cursor.ch;
-					while (start > 0 && !/\s/.test(line[start - 1]!))
+					while (start > 0 && !/\s/.test(line.charAt(start - 1)))
 						start--;
-					while (end < line.length && !/\s/.test(line[end]!))
+					while (end < line.length && !/\s/.test(line.charAt(end)))
 						end++;
 					text = line.substring(start, end);
 					if (!text) return;
@@ -62,11 +67,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					);
 				}
 
-				editor.replaceSelection(`[[${text}]]`);
+				const cursor = editor.getCursor("from");
+				const lineText = editor.getLine(cursor.line);
+				const before = lineText.substring(0, cursor.ch);
+				if (this.isInsideWikilink(before)) return;
+
+				const safe = sanitize(text);
+				editor.replaceSelection(`[[${safe}]]`);
 
 				if (!this.manualLookup.has(text.toLowerCase())) {
-					const sep = this.settings.keywordList.trim() ? "\n" : "";
-					this.settings.keywordList += sep + text;
+					const list = this.settings.keywordList.trimEnd();
+					const sep = list ? "\n" : "";
+					this.settings.keywordList = list + sep + text;
 					this.saveSettings();
 				}
 			},
@@ -98,7 +110,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.scanTimer = window.setTimeout(() => {
 			this.scanVaultLinks();
 			this.scanTimer = null;
-		}, 500);
+		}, 2000);
 	}
 
 	private scanVaultLinks() {
@@ -191,7 +203,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const tripleSlash = this.matchTripleSlash(textBefore);
 		if (tripleSlash) {
 			const absStart = line.from + tripleSlash.start;
-			const insert = `[[${tripleSlash.target}|${tripleSlash.displayText}]] `;
+			const t = sanitize(tripleSlash.target);
+			const d = sanitize(tripleSlash.displayText);
+			const insert = `[[${t}|${d}]] `;
 			view.dispatch({
 				changes: { from: absStart, to: pos, insert },
 				selection: { anchor: absStart + insert.length },
@@ -202,10 +216,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const direct = this.matchKeyword(textBefore);
 		if (direct) {
 			const absStart = line.from + direct.start;
+			const kw = sanitize(direct.keyword);
+			const tg = sanitize(direct.target);
 			const insert =
-				direct.keyword.toLowerCase() === direct.target.toLowerCase()
-					? `[[${direct.keyword}]] `
-					: `[[${direct.target}|${direct.keyword}]] `;
+				kw.toLowerCase() === tg.toLowerCase()
+					? `[[${kw}]] `
+					: `[[${tg}|${kw}]] `;
 			view.dispatch({
 				changes: { from: absStart, to: pos, insert },
 				selection: { anchor: absStart + insert.length },
@@ -306,6 +322,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return null;
 	}
 
+	debouncedSave() {
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.saveTimer = window.setTimeout(() => {
+			this.saveSettings();
+			this.saveTimer = null;
+		}, 500);
+	}
+
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
@@ -352,9 +376,10 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			text.inputEl.style.width = "100%";
 			text.inputEl.rows = 28;
 			text.setValue(this.plugin.settings.keywordList).onChange(
-				async (value) => {
+				(value) => {
 					this.plugin.settings.keywordList = value;
-					await this.plugin.saveSettings();
+					this.plugin.parseManualKeywords();
+					this.plugin.debouncedSave();
 				}
 			);
 		});
