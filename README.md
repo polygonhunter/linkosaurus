@@ -1,105 +1,159 @@
-# AutoLink Keywords
+# Linkosaurus
 
-An Obsidian plugin that automatically converts keywords into `[[wikilinks]]` as you type. Works on desktop and mobile (iOS/Android).
+**Dein Vault verlinkt sich von selbst.**
+
+Linkosaurus verwandelt Obsidian in ein intelligentes Notizsystem, das Verbindungen zwischen deinen Gedanken automatisch erkennt — während du schreibst, diktierst oder einfügst. Kein manuelles `[[` mehr. Kein Unterbrechen deines Schreibflusses. Tippe einfach ein Keyword, drücke Leertaste, und der Link steht.
+
+Funktioniert auf Desktop und Mobilgeräten (iOS/Android).
+
+---
 
 ## Features
 
-### Auto-linking on Space
+### Automatisches Verlinken beim Tippen
 
-Type a keyword and press Space — it becomes a wikilink automatically.
+Tippe ein Keyword und drücke Leertaste — Linkosaurus erkennt es sofort und erstellt den passenden Wikilink.
 
-| You type | Result |
-|----------|--------|
+| Du tippst | Ergebnis |
+|-----------|----------|
 | `Dortmund ` | `[[Dortmund]] ` |
-| `NAS ` | `[[UGREEN NAS\|NAS]] ` (with alias mapping) |
+| `NAS ` | `[[UGREEN NAS\|NAS]] ` (mit Alias-Mapping) |
 
-### Alias syntax with `///`
+### Alias-Syntax mit `///`
 
-Type `displayText///keyword` followed by Space to create an aliased wikilink:
+Erstelle Links mit benutzerdefiniertem Anzeigetext direkt beim Schreiben. Perfekt für natürlichen Lesefluss.
 
-| You type | Result |
-|----------|--------|
+| Du tippst | Ergebnis |
+|-----------|----------|
 | `unterwegs///Dortmund ` | `[[Dortmund\|unterwegs]] ` |
 
-Only triggers if the target keyword exists in the keyword list.
+Funktioniert nur, wenn das Ziel-Keyword in der Keyword-Liste existiert.
 
-### Multi-word keywords
+### Multi-Wort-Keywords
 
-When both `New` and `New York` exist as keywords, the plugin handles this gracefully:
+Linkosaurus erkennt zusammengesetzte Begriffe wie "New York" automatisch — selbst wenn "New" allein auch ein Keyword ist:
 
-1. `New` + Space → `[[New]] ` (linked immediately)
-2. You type `Y` → the plugin detects that `New Y...` could become `New York`, undoes the link → `New Y`
-3. You type `ork` + Space → `[[New York]] `
+1. `New` + Leertaste → `[[New]]` (sofort verlinkt)
+2. Du tippst `Y` → Linkosaurus erkennt, dass `New Y...` zu `New York` werden könnte, macht den Link rückgängig → `New Y`
+3. Du tippst `ork` + Leertaste → `[[New York]]`
 
-If you type something that doesn't continue a longer keyword (e.g. `H`), the `[[New]]` link stays.
+Wenn du etwas tippst, das keinen längeren Begriff fortsetzt (z.B. `H`), bleibt der `[[New]]`-Link bestehen.
 
-### Auto-detect vault notes
+### Vault-Scanning
 
-When enabled (default), **all note names** in your vault automatically become keywords. Creating a new note instantly makes its name auto-linkable — no manual configuration needed.
+Wenn aktiviert (Standard), werden **alle Notiznamen** in deinem Vault automatisch zu Keywords. Eine neue Notiz erstellen macht ihren Namen sofort auto-linkbar — keine manuelle Konfiguration nötig.
 
-Existing wikilinks in your vault are also detected, so linked-to notes that don't exist yet still get auto-linked.
+Bestehende Wikilinks in deinem Vault werden ebenfalls erkannt, sodass auch verlinkte Notizen, die noch nicht existieren, auto-verlinkt werden.
 
-### Shortcut command
+### Frontmatter-Aliases
 
-Select a word (or place your cursor on one) and run the command **"Link selection and add to keyword list"** to:
-- Wrap it in `[[wikilinks]]`
-- Add it to your manual keyword list
+Nutzt die `aliases`-Felder aus dem YAML-Frontmatter deiner Notizen als zusätzliche Keywords. Wenn eine Notiz "Dortmund" den Alias "BVB-Stadt" hat, wird auch "BVB-Stadt" automatisch verlinkt — direkt zur richtigen Notiz. Ein-/ausschaltbar in den Einstellungen.
 
-Assign a hotkey in Settings → Hotkeys.
+### Case-insensitive Matching
 
-## Keyword list format
+Egal ob du "dortmund", "Dortmund" oder "DORTMUND" tippst — Linkosaurus erkennt das Keyword und verlinkt es. Ein-/ausschaltbar je nach Präferenz.
 
-Configured in plugin settings as plain text, one entry per line.
+### Bestehende Texte nachträglich verlinken
+
+Der Befehl **"Auto-link keywords in current note"** durchsucht deine aktuelle Notiz und verlinkt alle erkannten Keywords auf einen Schlag. Frontmatter, Code-Blöcke, bestehende Links und URLs bleiben dabei unangetastet. Die Notiz verlinkt nie auf sich selbst.
+
+### Paste & Diktat
+
+Eingefügter oder diktierter Text wird automatisch auf Keywords geprüft und verlinkt — ohne manuelles Nacharbeiten.
+
+### Blocklist
+
+Bestimmte Begriffe wie "Home", "TODO" oder "Daily" sollen nicht automatisch verlinkt werden? Trag sie einfach in die Blocklist ein (eine pro Zeile). Betrifft nur auto-erkannte Keywords, nicht manuell definierte.
+
+### Minimale Keyword-Länge
+
+Setze eine Mindestlänge für auto-erkannte Keywords, um versehentliches Verlinken von kurzen Wörtern zu vermeiden. Manuelle Keywords bleiben davon unberührt.
+
+### Ordner-Filter
+
+Bestimme, welche Ordner beim Vault-Scanning berücksichtigt oder ausgeschlossen werden. Ideal um Templates, Daily Notes oder Archiv-Ordner vom Auto-Linking auszunehmen.
+
+### Shortcut-Befehl
+
+Markiere ein Wort (oder platziere den Cursor darauf) und führe **"Link selection and add to keyword list"** aus — das Wort wird sofort verlinkt und gleichzeitig zur Keyword-Liste hinzugefügt. Einer Tastenkombination zuweisbar unter Einstellungen → Tastenkürzel.
+
+---
+
+## Keyword-Liste
+
+Wird in den Plugin-Einstellungen als Klartext konfiguriert, ein Eintrag pro Zeile.
 
 ```
-# Comments start with #
+# Kommentare beginnen mit #
 Dortmund
 Lippstadt
 
-# Alias mapping: keyword = target note
+# Alias-Mapping: Keyword = Zielnotiz
 NAS = UGREEN NAS
 ```
 
-**Rules:**
-- `Dortmund` — keyword and target are identical → `[[Dortmund]]`
-- `NAS = UGREEN NAS` — left is keyword, right is target → `[[UGREEN NAS|NAS]]`
-- Lines starting with `#` are comments
-- Empty lines are ignored
-- Matching is case-insensitive
-- Manual entries take priority over auto-detected vault keywords
+**Regeln:**
+- `Dortmund` — Keyword und Ziel sind identisch → `[[Dortmund]]`
+- `NAS = UGREEN NAS` — links ist das Keyword, rechts das Ziel → `[[UGREEN NAS|NAS]]`
+- Zeilen mit `#` am Anfang sind Kommentare
+- Leere Zeilen werden ignoriert
+- Manuelle Einträge haben Vorrang vor auto-erkannten Vault-Keywords
 
-## Settings
+---
 
-| Setting | Description |
-|---------|-------------|
-| **Keyword list** | Monospace textarea for manual keywords |
-| **Auto-detect vault links** | Toggle to automatically use all note names as keywords. Shows a collapsible list of detected keywords. |
+## Einstellungen
 
-## Where it won't trigger
+| Einstellung | Beschreibung |
+|-------------|--------------|
+| **Keyword list** | Textarea für manuell definierte Keywords |
+| **Case-insensitive matching** | Groß-/Kleinschreibung beim Matching ignorieren |
+| **Auto-detect vault links** | Alle Notiznamen automatisch als Keywords verwenden |
+| **Include frontmatter aliases** | Aliases aus dem Frontmatter als Keywords nutzen |
+| **Minimum keyword length** | Mindestlänge für auto-erkannte Keywords (0 = kein Limit) |
+| **Blocklist** | Keywords, die vom Auto-Linking ausgeschlossen werden |
+| **Folder filter mode** | Ordner ein- oder ausschließen |
+| **Folder filter** | Liste der zu filternden Ordner |
 
-- Inside existing `[[wikilinks]]`
-- Inside code blocks (fenced or inline)
-- When text already starts with `[[`
+---
+
+## Wo es nicht auslöst
+
+- Innerhalb bestehender `[[Wikilinks]]`
+- In Code-Blöcken (fenced oder inline)
+- In URLs
+- In YAML-Frontmatter
+- Wenn der Text bereits mit `[[` beginnt
+
+---
+
+## Datenschutz
+
+Linkosaurus läuft **vollständig lokal**. Keine Notizen, keine Keywords, keine Daten verlassen deinen Rechner. Auf GitHub liegt ausschließlich der Plugin-Code.
+
+---
 
 ## Installation
 
-### Via BRAT (recommended for mobile)
+### Via BRAT (empfohlen für Mobilgeräte)
 
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
-2. In BRAT settings, click **Add beta plugin**
-3. Enter: `polygonhunter/linkosaurus`
-4. Enable **AutoLink Keywords** in Community Plugins
+1. Installiere das [BRAT](https://github.com/TfTHacker/obsidian42-brat) Plugin
+2. In den BRAT-Einstellungen: **Add beta plugin**
+3. Eingeben: `polygonhunter/linkosaurus`
+4. **Linkosaurus** in den Community Plugins aktivieren
 
-### Manual
+### Manuell
 
-1. Clone this repository
+1. Repository klonen
 2. `npm install && npm run build`
-3. Copy `main.js` and `manifest.json` to `.obsidian/plugins/autolink-keywords/`
-4. Enable the plugin in Obsidian settings
+3. `main.js` und `manifest.json` nach `.obsidian/plugins/autolink-keywords/` kopieren
+4. Plugin in den Obsidian-Einstellungen aktivieren
 
-## Technical details
+---
 
-- Uses `EditorView.inputHandler` (CodeMirror 6) to intercept Space input — works reliably on both desktop and mobile virtual keyboards
-- Atomic replacements via `view.dispatch()` transactions
-- Vault scanning uses Obsidian's `metadataCache` with 2-second debounce
-- All timers are cleaned up on plugin unload
+## Technische Details
+
+- Nutzt `EditorView.inputHandler` (CodeMirror 6) zur Eingabe-Interception — funktioniert zuverlässig auf Desktop und mobilen Tastaturen
+- Atomare Ersetzungen via `view.dispatch()` Transaktionen
+- Vault-Scanning über Obsidians `metadataCache` mit 2-Sekunden-Debounce
+- Alle Timer werden beim Plugin-Entladen bereinigt
+- Sichere Eingabebereinigung gegen Wikilink-Injection
