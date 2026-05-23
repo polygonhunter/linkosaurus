@@ -37,7 +37,7 @@ interface PendingUndo {
 }
 
 function sanitize(text: string): string {
-	return text.replace(/\]\]|\[\[|[|#^\n\r\0]/g, "");
+	return text.replace(/\]\]|\[\[|[|#^\\\/\n\r\0]/g, "");
 }
 
 export default class AutoLinkKeywordsPlugin extends Plugin {
@@ -122,6 +122,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			name: "Auto-link keywords in current note",
 			editorCallback: (editor) => {
 				const content = editor.getValue();
+				if (content.length > 100000) {
+					new Notice(
+						"Note too large for auto-linking (max 100k characters)."
+					);
+					return;
+				}
 				const replaced = this.replaceKeywordsInText(content, "", "");
 				if (replaced === content) {
 					new Notice("No keywords found to link.");
@@ -803,6 +809,17 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		if (typeof this.settings.keywordList !== "string")
+			this.settings.keywordList = "";
+		if (typeof this.settings.blocklist !== "string")
+			this.settings.blocklist = "";
+		if (typeof this.settings.folderFilter !== "string")
+			this.settings.folderFilter = "";
+		if (
+			this.settings.folderFilterMode !== "include" &&
+			this.settings.folderFilterMode !== "exclude"
+		)
+			this.settings.folderFilterMode = "exclude";
 	}
 
 	async saveSettings() {
