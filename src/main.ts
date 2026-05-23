@@ -1,6 +1,5 @@
 import { Plugin, PluginSettingTab, App, Setting } from "obsidian";
-import { keymap, EditorView } from "@codemirror/view";
-import { EditorState, Transaction } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
 interface AutoLinkSettings {
@@ -18,16 +17,15 @@ interface KeywordEntry {
 	target: string;
 }
 
-function sanitize(text: string): string {
-	return text.replace(/\]\]/g, "");
-}
-
 interface PendingUndo {
 	from: number;
-	to: number;
 	typedText: string;
 	matchedKeywordLower: string;
 	timer: number;
+}
+
+function sanitize(text: string): string {
+	return text.replace(/\]\]|\[\[|[|#^]/g, "");
 }
 
 export default class AutoLinkKeywordsPlugin extends Plugin {
@@ -46,15 +44,23 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.parseManualKeywords();
 
 		this.registerEditorExtension([
-			keymap.of([
-				{
-					key: "Space",
-					run: (view: EditorView) => this.handleSpace(view),
-				},
-			]),
-			EditorState.transactionFilter.of((tr: Transaction) =>
-				this.filterTransaction(tr)
+			EditorView.inputHandler.of(
+				(
+					view: EditorView,
+					from: number,
+					to: number,
+					text: string
+				) => this.handleInput(view, from, to, text)
 			),
+			EditorView.updateListener.of((update) => {
+				if (
+					this.pendingUndo &&
+					update.selectionSet &&
+					!update.docChanged
+				) {
+					this.clearPendingUndo();
+				}
+			}),
 		]);
 
 		this.addCommand({
@@ -118,6 +124,142 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("rename", () => this.scheduleScan())
 		);
+	}
+
+	onunload() {
+		if (this.scanTimer !== null) window.clearTimeout(this.scanTimer);
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.clearPendingUndo();
+	}
+
+	private handleInput(
+		view: EditorView,
+		from: number,
+		to: number,
+		text: string
+	): boolean {
+		if (from !== to || !text) return false;
+
+		if (this.pendingUndo) {
+			if (/^\s+$/.test(text)) return false;
+			return this.handleUndoOnContinue(view, from, text);
+		}
+
+		if (text === " ") {
+			return this.handleSpaceInput(view, from);
+		}
+
+		return false;
+	}
+
+	private handleSpaceInput(view: EditorView, pos: number): boolean {
+		const state = view.state;
+		const line = state.doc.lineAt(pos);
+		const colOffset = pos - line.from;
+		const textBefore = line.text.substring(0, colOffset);
+
+		if (!textBefore.length) return false;
+		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
+		if (this.isInsideWikilink(textBefore)) return false;
+
+		const tripleSlash = this.matchTripleSlash(textBefore);
+		if (tripleSlash) {
+			const absStart = line.from + tripleSlash.start;
+			const t = sanitize(tripleSlash.target);
+			const d = sanitize(tripleSlash.displayText);
+			const insert = `[[${t}|${d}]] `;
+			view.dispatch({
+				changes: { from: absStart, to: pos, insert },
+				selection: { anchor: absStart + insert.length },
+			});
+			return true;
+		}
+
+		const direct = this.matchKeyword(textBefore);
+		if (direct) {
+			const absStart = line.from + direct.start;
+			const kw = sanitize(direct.keyword);
+			const tg = sanitize(direct.target);
+			const insert =
+				kw.toLowerCase() === tg.toLowerCase()
+					? `[[${kw}]] `
+					: `[[${tg}|${kw}]] `;
+			view.dispatch({
+				changes: { from: absStart, to: pos, insert },
+				selection: { anchor: absStart + insert.length },
+			});
+
+			const kwLower = direct.keyword.toLowerCase();
+			const prefix = kwLower + " ";
+			const hasLonger = this.entries.some(
+				(e) =>
+					e.keyword.length > direct.keyword.length &&
+					e.keyword.toLowerCase().startsWith(prefix)
+			);
+			if (hasLonger) {
+				this.clearPendingUndo();
+				this.pendingUndo = {
+					from: absStart,
+					typedText: direct.typedText,
+					matchedKeywordLower: kwLower,
+					timer: window.setTimeout(
+						() => (this.pendingUndo = null),
+						5000
+					),
+				};
+			}
+
+			return true;
+		}
+
+		return false;
+	}
+
+	private handleUndoOnContinue(
+		view: EditorView,
+		from: number,
+		text: string
+	): boolean {
+		const pending = this.pendingUndo;
+		if (!pending) return false;
+
+		const doc = view.state.doc;
+		if (
+			from <= pending.from ||
+			doc.sliceString(pending.from, pending.from + 2) !== "[["
+		) {
+			this.clearPendingUndo();
+			return false;
+		}
+
+		const firstChar = text.charAt(0);
+		const prefix =
+			pending.matchedKeywordLower +
+			" " +
+			firstChar.toLowerCase();
+		const couldGrow = this.entries.some((e) =>
+			e.keyword.toLowerCase().startsWith(prefix)
+		);
+
+		if (!couldGrow) {
+			this.clearPendingUndo();
+			return false;
+		}
+
+		this.clearPendingUndo();
+		const restoreText = pending.typedText + " " + text;
+		view.dispatch({
+			changes: { from: pending.from, to: from, insert: restoreText },
+			selection: { anchor: pending.from + restoreText.length },
+		});
+		return true;
+	}
+
+	private clearPendingUndo() {
+		if (this.pendingUndo) {
+			window.clearTimeout(this.pendingUndo.timer);
+			this.pendingUndo = null;
+		}
 	}
 
 	private scheduleScan() {
@@ -210,147 +352,6 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		this.entries.sort((a, b) => b.keyword.length - a.keyword.length);
-	}
-
-	private clearPendingUndo() {
-		if (this.pendingUndo) {
-			window.clearTimeout(this.pendingUndo.timer);
-			this.pendingUndo = null;
-		}
-	}
-
-	private handleSpace(view: EditorView): boolean {
-		this.clearPendingUndo();
-
-		const state = view.state;
-		const sel = state.selection.main;
-		if (!sel.empty) return false;
-
-		const pos = sel.head;
-		const line = state.doc.lineAt(pos);
-		const colOffset = pos - line.from;
-		const textBefore = line.text.substring(0, colOffset);
-
-		if (!textBefore.length) return false;
-
-		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
-		if (this.isInsideWikilink(textBefore)) return false;
-
-		const tripleSlash = this.matchTripleSlash(textBefore);
-		if (tripleSlash) {
-			const absStart = line.from + tripleSlash.start;
-			const t = sanitize(tripleSlash.target);
-			const d = sanitize(tripleSlash.displayText);
-			const insert = `[[${t}|${d}]] `;
-			view.dispatch({
-				changes: { from: absStart, to: pos, insert },
-				selection: { anchor: absStart + insert.length },
-			});
-			return true;
-		}
-
-		const direct = this.matchKeyword(textBefore);
-		if (direct) {
-			const absStart = line.from + direct.start;
-			const kw = sanitize(direct.keyword);
-			const tg = sanitize(direct.target);
-			const insert =
-				kw.toLowerCase() === tg.toLowerCase()
-					? `[[${kw}]] `
-					: `[[${tg}|${kw}]] `;
-			view.dispatch({
-				changes: { from: absStart, to: pos, insert },
-				selection: { anchor: absStart + insert.length },
-			});
-
-			const kwLower = direct.keyword.toLowerCase();
-			const prefix = kwLower + " ";
-			const hasLonger = this.entries.some(
-				(e) =>
-					e.keyword.length > direct.keyword.length &&
-					e.keyword.toLowerCase().startsWith(prefix)
-			);
-			if (hasLonger) {
-				this.pendingUndo = {
-					from: absStart,
-					to: absStart + insert.length,
-					typedText: direct.typedText,
-					matchedKeywordLower: kwLower,
-					timer: window.setTimeout(
-						() => (this.pendingUndo = null),
-						5000
-					),
-				};
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
-	private filterTransaction(tr: Transaction): any {
-		const pending = this.pendingUndo;
-		if (!pending || !tr.docChanged) return tr;
-
-		let insertedText = "";
-		let insertAt = -1;
-		tr.changes.iterChanges(
-			(
-				fromA: number,
-				toA: number,
-				_fromB: number,
-				_toB: number,
-				inserted
-			) => {
-				if (insertAt === -1 && toA === fromA) {
-					insertedText = inserted.toString();
-					insertAt = fromA;
-				}
-			}
-		);
-
-		if (!insertedText || insertAt === -1) {
-			this.clearPendingUndo();
-			return tr;
-		}
-
-		if (Math.abs(insertAt - pending.to) > 3) {
-			this.clearPendingUndo();
-			return tr;
-		}
-
-		if (/^\s+$/.test(insertedText)) {
-			pending.to += insertedText.length;
-			return tr;
-		}
-
-		const firstChar = insertedText.charAt(0);
-		const prefix =
-			pending.matchedKeywordLower +
-			" " +
-			firstChar.toLowerCase();
-		const couldGrow = this.entries.some((e) =>
-			e.keyword.toLowerCase().startsWith(prefix)
-		);
-
-		if (!couldGrow) {
-			this.clearPendingUndo();
-			return tr;
-		}
-
-		this.clearPendingUndo();
-		const restoreText = pending.typedText + " " + insertedText;
-		return {
-			changes: {
-				from: pending.from,
-				to: pending.to,
-				insert: restoreText,
-			},
-			selection: {
-				anchor: pending.from + restoreText.length,
-			},
-		};
 	}
 
 	private isInCodeContext(
@@ -475,7 +476,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.parseManualKeywords();
 		if (this.settings.scanVaultLinks) {
-			this.scanVaultLinks();
+			this.scheduleScan();
 		}
 	}
 }
