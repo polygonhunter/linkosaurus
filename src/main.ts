@@ -134,7 +134,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.vaultEntries = [];
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			const noteName = file.basename;
+			const noteName = file.basename.trim();
+			if (!noteName) continue;
 			const lower = noteName.toLowerCase();
 			if (!seen.has(lower) && !this.manualLookup.has(lower)) {
 				seen.add(lower);
@@ -150,9 +151,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			for (const link of cache.links) {
 				const raw = link.link.split("#")[0]!.split("^")[0]!.trim();
 				if (!raw) continue;
-				const linkName = raw.includes("/")
-					? raw.split("/").pop()!
-					: raw;
+				const linkName = (
+					raw.includes("/") ? raw.split("/").pop()! : raw
+				).trim();
+				if (!linkName) continue;
 				const linkLower = linkName.toLowerCase();
 				if (seen.has(linkLower) || this.manualLookup.has(linkLower))
 					continue;
@@ -419,6 +421,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return null;
 	}
 
+	getVaultKeywords(): string[] {
+		return this.vaultEntries
+			.map((e) => e.keyword)
+			.sort((a, b) => a.localeCompare(b));
+	}
+
 	debouncedSave() {
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.saveTimer = window.setTimeout(() => {
@@ -492,7 +500,33 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.scanVaultLinks = value;
 						await this.plugin.saveSettings();
+						this.display();
 					});
 			});
+
+		if (this.plugin.settings.scanVaultLinks) {
+			const vault = this.plugin.getVaultKeywords();
+			const details = containerEl.createEl("details");
+			details.style.marginTop = "0.5em";
+			const summary = details.createEl("summary");
+			summary.style.cursor = "pointer";
+			summary.style.color = "var(--text-muted)";
+			summary.setText(
+				`Auto-detected keywords (${vault.length})`
+			);
+			if (vault.length > 0) {
+				const list = details.createEl("div");
+				list.style.fontFamily = "monospace";
+				list.style.fontSize = "0.85em";
+				list.style.marginTop = "0.5em";
+				list.style.maxHeight = "300px";
+				list.style.overflowY = "auto";
+				list.style.padding = "0.5em";
+				list.style.background = "var(--background-secondary)";
+				list.style.borderRadius = "4px";
+				list.setText(vault.join("\n"));
+				list.style.whiteSpace = "pre-wrap";
+			}
+		}
 	}
 }
