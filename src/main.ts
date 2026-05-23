@@ -25,7 +25,7 @@ interface PendingUndo {
 }
 
 function sanitize(text: string): string {
-	return text.replace(/\]\]|\[\[|[|#^]/g, "");
+	return text.replace(/\]\]|\[\[|[|#^\n\r\0]/g, "");
 }
 
 export default class AutoLinkKeywordsPlugin extends Plugin {
@@ -228,7 +228,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		text: string
 	): boolean {
 		if (this.entries.length === 0) return false;
-		if (this.pendingUndo) this.clearPendingUndo();
+		if (text.length > 10000) return false;
 
 		const state = view.state;
 		const line = state.doc.lineAt(from);
@@ -253,6 +253,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		);
 		if (replaced === text) return false;
 
+		if (this.pendingUndo) this.clearPendingUndo();
+
 		view.dispatch({
 			changes: { from, to, insert: replaced },
 			selection: { anchor: from + replaced.length },
@@ -266,37 +268,111 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		charAfter: string
 	): string {
 		const result: string[] = [];
+		const lowerText = text.toLowerCase();
 		let i = 0;
 
 		while (i < text.length) {
-			if (text.substring(i, i + 3) === "```") {
-				const closeIdx = text.indexOf("```", i + 3);
+			const sub3 = text.substring(i, i + 3);
+
+			if (sub3 === "```" || sub3 === "~~~") {
+				const closeIdx = text.indexOf(sub3, i + 3);
 				if (closeIdx !== -1) {
 					result.push(text.substring(i, closeIdx + 3));
 					i = closeIdx + 3;
-					continue;
+				} else {
+					result.push(text.substring(i));
+					i = text.length;
 				}
+				continue;
 			}
 
 			if (text.substring(i, i + 2) === "[[") {
 				const closeIdx = text.indexOf("]]", i + 2);
 				if (closeIdx !== -1) {
-					result.push(text.substring(i, closeIdx + 2));
+					result.push(
+						text.substring(i, closeIdx + 2)
+					);
 					i = closeIdx + 2;
-					continue;
+				} else {
+					result.push(text.substring(i));
+					i = text.length;
+				}
+				continue;
+			}
+
+			if (text.charAt(i) === "[") {
+				const bracketClose = text.indexOf("](", i + 1);
+				if (bracketClose !== -1) {
+					const parenClose = text.indexOf(
+						")",
+						bracketClose + 2
+					);
+					if (parenClose !== -1) {
+						result.push(
+							text.substring(i, parenClose + 1)
+						);
+						i = parenClose + 1;
+						continue;
+					}
 				}
 			}
 
-			if (text[i] === "`") {
+			if (text.charAt(i) === "`") {
 				const closeIdx = text.indexOf("`", i + 1);
 				if (closeIdx !== -1) {
-					result.push(text.substring(i, closeIdx + 1));
+					result.push(
+						text.substring(i, closeIdx + 1)
+					);
 					i = closeIdx + 1;
-					continue;
+				} else {
+					result.push(text.substring(i));
+					i = text.length;
 				}
+				continue;
 			}
 
-			const prevChar = i === 0 ? charBefore : text[i - 1];
+			const lower7 = lowerText.substring(i, i + 8);
+			if (
+				lower7.startsWith("http://") ||
+				lower7.startsWith("https://")
+			) {
+				let end = i;
+				while (
+					end < text.length &&
+					!/\s/.test(text.charAt(end))
+				)
+					end++;
+				result.push(text.substring(i, end));
+				i = end;
+				continue;
+			}
+
+			const code = text.charCodeAt(i);
+			if (
+				code >= 0xd800 &&
+				code <= 0xdbff &&
+				i + 1 < text.length
+			) {
+				result.push(text.substring(i, i + 2));
+				i += 2;
+				continue;
+			}
+
+			let prevChar: string;
+			if (i === 0) {
+				prevChar = charBefore;
+			} else {
+				const prevCode = text.charCodeAt(i - 1);
+				if (
+					prevCode >= 0xdc00 &&
+					prevCode <= 0xdfff &&
+					i >= 2
+				) {
+					prevChar = text.substring(i - 2, i);
+				} else {
+					prevChar = text.charAt(i - 1);
+				}
+			}
 			const atStartBoundary =
 				!prevChar || !/[\p{L}\p{N}]/u.test(prevChar);
 
@@ -308,16 +384,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					if (i + kwLen > text.length) continue;
 
 					if (
-						text
-							.substring(i, i + kwLen)
-							.toLowerCase() !== kwLower
+						lowerText.substring(i, i + kwLen) !==
+						kwLower
 					)
 						continue;
 
 					const endPos = i + kwLen;
 					const nextChar =
 						endPos < text.length
-							? text[endPos]
+							? text.charAt(endPos)
 							: charAfter;
 					if (
 						nextChar &&
