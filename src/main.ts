@@ -138,7 +138,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		to: number,
 		text: string
 	): boolean {
-		if (from !== to || !text) return false;
+		if (!text) return false;
+
+		if (text.length > 1) {
+			return this.handleBulkInput(view, from, to, text);
+		}
+
+		if (from !== to) return false;
 
 		if (this.pendingUndo) {
 			if (/^\s+$/.test(text)) return false;
@@ -213,6 +219,131 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		return false;
+	}
+
+	private handleBulkInput(
+		view: EditorView,
+		from: number,
+		to: number,
+		text: string
+	): boolean {
+		if (this.entries.length === 0) return false;
+		if (this.pendingUndo) this.clearPendingUndo();
+
+		const state = view.state;
+		const line = state.doc.lineAt(from);
+		const colOffset = from - line.from;
+		if (this.isInCodeContext(view, from, line.text, colOffset))
+			return false;
+
+		const textBefore = line.text.substring(0, colOffset);
+		if (this.isInsideWikilink(textBefore)) return false;
+
+		const charBefore =
+			from > 0 ? state.doc.sliceString(from - 1, from) : "";
+		const charAfter =
+			to < state.doc.length
+				? state.doc.sliceString(to, to + 1)
+				: "";
+
+		const replaced = this.replaceKeywordsInText(
+			text,
+			charBefore,
+			charAfter
+		);
+		if (replaced === text) return false;
+
+		view.dispatch({
+			changes: { from, to, insert: replaced },
+			selection: { anchor: from + replaced.length },
+		});
+		return true;
+	}
+
+	private replaceKeywordsInText(
+		text: string,
+		charBefore: string,
+		charAfter: string
+	): string {
+		const result: string[] = [];
+		let i = 0;
+
+		while (i < text.length) {
+			if (text.substring(i, i + 3) === "```") {
+				const closeIdx = text.indexOf("```", i + 3);
+				if (closeIdx !== -1) {
+					result.push(text.substring(i, closeIdx + 3));
+					i = closeIdx + 3;
+					continue;
+				}
+			}
+
+			if (text.substring(i, i + 2) === "[[") {
+				const closeIdx = text.indexOf("]]", i + 2);
+				if (closeIdx !== -1) {
+					result.push(text.substring(i, closeIdx + 2));
+					i = closeIdx + 2;
+					continue;
+				}
+			}
+
+			if (text[i] === "`") {
+				const closeIdx = text.indexOf("`", i + 1);
+				if (closeIdx !== -1) {
+					result.push(text.substring(i, closeIdx + 1));
+					i = closeIdx + 1;
+					continue;
+				}
+			}
+
+			const prevChar = i === 0 ? charBefore : text[i - 1];
+			const atStartBoundary =
+				!prevChar || !/[\p{L}\p{N}]/u.test(prevChar);
+
+			if (atStartBoundary) {
+				let matched = false;
+				for (const entry of this.entries) {
+					const kwLower = entry.keyword.toLowerCase();
+					const kwLen = kwLower.length;
+					if (i + kwLen > text.length) continue;
+
+					if (
+						text
+							.substring(i, i + kwLen)
+							.toLowerCase() !== kwLower
+					)
+						continue;
+
+					const endPos = i + kwLen;
+					const nextChar =
+						endPos < text.length
+							? text[endPos]
+							: charAfter;
+					if (
+						nextChar &&
+						/[\p{L}\p{N}]/u.test(nextChar)
+					)
+						continue;
+
+					const kw = sanitize(entry.keyword);
+					const tg = sanitize(entry.target);
+					if (kw.toLowerCase() === tg.toLowerCase()) {
+						result.push(`[[${kw}]]`);
+					} else {
+						result.push(`[[${tg}|${kw}]]`);
+					}
+					i = endPos;
+					matched = true;
+					break;
+				}
+				if (matched) continue;
+			}
+
+			result.push(text.charAt(i));
+			i++;
+		}
+
+		return result.join("");
 	}
 
 	private handleUndoOnContinue(
