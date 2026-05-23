@@ -1,15 +1,27 @@
-import { Plugin, PluginSettingTab, App, Setting } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
 interface AutoLinkSettings {
 	keywordList: string;
 	scanVaultLinks: boolean;
+	caseInsensitive: boolean;
+	scanFrontmatterAliases: boolean;
+	blocklist: string;
+	minKeywordLength: number;
+	folderFilter: string;
+	folderFilterMode: "include" | "exclude";
 }
 
 const DEFAULT_SETTINGS: AutoLinkSettings = {
 	keywordList: "",
 	scanVaultLinks: true,
+	caseInsensitive: true,
+	scanFrontmatterAliases: true,
+	blocklist: "",
+	minKeywordLength: 0,
+	folderFilter: "",
+	folderFilterMode: "exclude",
 };
 
 interface KeywordEntry {
@@ -20,7 +32,7 @@ interface KeywordEntry {
 interface PendingUndo {
 	from: number;
 	typedText: string;
-	matchedKeywordLower: string;
+	matchedKeywordNorm: string;
 	timer: number;
 }
 
@@ -35,12 +47,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private manualEntries: KeywordEntry[] = [];
 	private manualLookup = new Map<string, string>();
 	private vaultEntries: KeywordEntry[] = [];
+	private blocklistSet = new Set<string>();
 	private scanTimer: number | null = null;
 	private saveTimer: number | null = null;
 	private pendingUndo: PendingUndo | null = null;
 
 	async onload() {
 		await this.loadSettings();
+		this.parseBlocklist();
 		this.parseManualKeywords();
 
 		this.registerEditorExtension([
@@ -103,6 +117,29 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "autolink-current-note",
+			name: "Auto-link keywords in current note",
+			editorCallback: (editor) => {
+				const content = editor.getValue();
+				const replaced = this.replaceKeywordsInText(content, "", "");
+				if (replaced === content) {
+					new Notice("No keywords found to link.");
+					return;
+				}
+				const cursor = editor.getCursor();
+				const lastLine = editor.lastLine();
+				const lastCh = editor.getLine(lastLine).length;
+				editor.replaceRange(
+					replaced,
+					{ line: 0, ch: 0 },
+					{ line: lastLine, ch: lastCh }
+				);
+				editor.setCursor(cursor);
+				new Notice("Keywords auto-linked.");
+			},
+		});
+
 		this.addSettingTab(new AutoLinkSettingTab(this.app, this));
 
 		this.app.workspace.onLayoutReady(() => {
@@ -130,6 +167,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.scanTimer !== null) window.clearTimeout(this.scanTimer);
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.clearPendingUndo();
+	}
+
+	private normalize(text: string): string {
+		return this.settings.caseInsensitive ? text.toLowerCase() : text;
 	}
 
 	private handleInput(
@@ -195,19 +236,20 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				selection: { anchor: absStart + insert.length },
 			});
 
-			const kwLower = direct.keyword.toLowerCase();
-			const prefix = kwLower + " ";
-			const hasLonger = this.entries.some(
-				(e) =>
-					e.keyword.length > direct.keyword.length &&
-					e.keyword.toLowerCase().startsWith(prefix)
-			);
+			const kwNorm = this.normalize(direct.keyword);
+			const prefix = kwNorm + " ";
+			const hasLonger = this.entries.some((e) => {
+				const norm = this.normalize(e.keyword);
+				return (
+					norm.length > kwNorm.length && norm.startsWith(prefix)
+				);
+			});
 			if (hasLonger) {
 				this.clearPendingUndo();
 				this.pendingUndo = {
 					from: absStart,
 					typedText: direct.typedText,
-					matchedKeywordLower: kwLower,
+					matchedKeywordNorm: kwNorm,
 					timer: window.setTimeout(
 						() => (this.pendingUndo = null),
 						5000
@@ -268,8 +310,25 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		charAfter: string
 	): string {
 		const result: string[] = [];
-		const lowerText = text.toLowerCase();
+		const ci = this.settings.caseInsensitive;
+		const normalizedText = ci ? text.toLowerCase() : text;
 		let i = 0;
+
+		if (text.startsWith("---\n") || text.startsWith("---\r\n")) {
+			const searchFrom = text.indexOf("\n") + 1;
+			const endIdx = text.indexOf("\n---", searchFrom);
+			if (endIdx !== -1) {
+				let fmEnd = endIdx + 4;
+				if (fmEnd < text.length && text[fmEnd] === "\n") fmEnd++;
+				else if (fmEnd < text.length && text[fmEnd] === "\r") {
+					fmEnd++;
+					if (fmEnd < text.length && text[fmEnd] === "\n")
+						fmEnd++;
+				}
+				result.push(text.substring(0, fmEnd));
+				i = fmEnd;
+			}
+		}
 
 		while (i < text.length) {
 			const sub3 = text.substring(i, i + 3);
@@ -289,9 +348,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (text.substring(i, i + 2) === "[[") {
 				const closeIdx = text.indexOf("]]", i + 2);
 				if (closeIdx !== -1) {
-					result.push(
-						text.substring(i, closeIdx + 2)
-					);
+					result.push(text.substring(i, closeIdx + 2));
 					i = closeIdx + 2;
 				} else {
 					result.push(text.substring(i));
@@ -320,9 +377,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (text.charAt(i) === "`") {
 				const closeIdx = text.indexOf("`", i + 1);
 				if (closeIdx !== -1) {
-					result.push(
-						text.substring(i, closeIdx + 1)
-					);
+					result.push(text.substring(i, closeIdx + 1));
 					i = closeIdx + 1;
 				} else {
 					result.push(text.substring(i));
@@ -331,7 +386,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				continue;
 			}
 
-			const lower7 = lowerText.substring(i, i + 8);
+			const lower7 = normalizedText.substring(i, i + 8);
 			if (
 				lower7.startsWith("http://") ||
 				lower7.startsWith("https://")
@@ -379,13 +434,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (atStartBoundary) {
 				let matched = false;
 				for (const entry of this.entries) {
-					const kwLower = entry.keyword.toLowerCase();
-					const kwLen = kwLower.length;
+					const kwNorm = ci
+						? entry.keyword.toLowerCase()
+						: entry.keyword;
+					const kwLen = kwNorm.length;
 					if (i + kwLen > text.length) continue;
 
 					if (
-						lowerText.substring(i, i + kwLen) !==
-						kwLower
+						normalizedText.substring(i, i + kwLen) !==
+						kwNorm
 					)
 						continue;
 
@@ -439,12 +496,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		const firstChar = text.charAt(0);
+		const firstCharNorm = this.normalize(firstChar);
 		const prefix =
-			pending.matchedKeywordLower +
-			" " +
-			firstChar.toLowerCase();
+			pending.matchedKeywordNorm + " " + firstCharNorm;
 		const couldGrow = this.entries.some((e) =>
-			e.keyword.toLowerCase().startsWith(prefix)
+			this.normalize(e.keyword).startsWith(prefix)
 		);
 
 		if (!couldGrow) {
@@ -481,7 +537,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const seen = new Set<string>();
 		this.vaultEntries = [];
 
+		const folderPaths = this.parseFolderFilter();
+		const filterMode = this.settings.folderFilterMode;
+
 		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (folderPaths.length > 0) {
+				const inFolder = folderPaths.some((fp) =>
+					file.path.startsWith(fp)
+				);
+				if (filterMode === "include" && !inFolder) continue;
+				if (filterMode === "exclude" && inFolder) continue;
+			}
+
 			const noteName = file.basename.trim();
 			if (!noteName) continue;
 			const lower = noteName.toLowerCase();
@@ -494,24 +561,56 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}
 
 			const cache = this.app.metadataCache.getFileCache(file);
-			if (!cache?.links) continue;
 
-			for (const link of cache.links) {
-				const raw = link.link.split("#")[0]!.split("^")[0]!.trim();
-				if (!raw) continue;
-				const linkName = (
-					raw.includes("/") ? raw.split("/").pop()! : raw
-				).trim();
-				if (!linkName) continue;
-				const linkLower = linkName.toLowerCase();
-				if (seen.has(linkLower) || this.manualLookup.has(linkLower))
-					continue;
-				seen.add(linkLower);
+			if (this.settings.scanFrontmatterAliases && cache?.frontmatter) {
+				const raw =
+					cache.frontmatter.aliases ?? cache.frontmatter.alias;
+				const aliasList = Array.isArray(raw)
+					? raw
+					: typeof raw === "string"
+						? [raw]
+						: [];
+				for (const alias of aliasList) {
+					const a = String(alias).trim();
+					if (!a) continue;
+					const aLower = a.toLowerCase();
+					if (
+						!seen.has(aLower) &&
+						!this.manualLookup.has(aLower)
+					) {
+						seen.add(aLower);
+						this.vaultEntries.push({
+							keyword: a,
+							target: noteName,
+						});
+					}
+				}
+			}
 
-				this.vaultEntries.push({
-					keyword: linkName,
-					target: linkName,
-				});
+			if (cache?.links) {
+				for (const link of cache.links) {
+					const raw = link.link
+						.split("#")[0]!
+						.split("^")[0]!
+						.trim();
+					if (!raw) continue;
+					const linkName = (
+						raw.includes("/") ? raw.split("/").pop()! : raw
+					).trim();
+					if (!linkName) continue;
+					const linkLower = linkName.toLowerCase();
+					if (
+						seen.has(linkLower) ||
+						this.manualLookup.has(linkLower)
+					)
+						continue;
+					seen.add(linkLower);
+
+					this.vaultEntries.push({
+						keyword: linkName,
+						target: linkName,
+					});
+				}
 			}
 		}
 
@@ -543,17 +642,45 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.rebuildEntries();
 	}
 
+	parseBlocklist() {
+		this.blocklistSet.clear();
+		for (const raw of this.settings.blocklist.split("\n")) {
+			const line = raw.trim();
+			if (line) {
+				this.blocklistSet.add(line.toLowerCase());
+			}
+		}
+	}
+
+	private parseFolderFilter(): string[] {
+		if (!this.settings.folderFilter.trim()) return [];
+		return this.settings.folderFilter
+			.split("\n")
+			.map((f) => f.trim())
+			.filter((f) => f.length > 0)
+			.map((f) => (f.endsWith("/") ? f : f + "/"));
+	}
+
 	private rebuildEntries() {
-		this.entries = [...this.manualEntries];
-		this.lookupMap = new Map(this.manualLookup);
+		const minLen = this.settings.minKeywordLength;
+
+		this.entries = [];
+		this.lookupMap = new Map();
+
+		for (const entry of this.manualEntries) {
+			const lower = entry.keyword.toLowerCase();
+			this.entries.push(entry);
+			this.lookupMap.set(lower, entry.target);
+		}
 
 		if (this.settings.scanVaultLinks) {
 			for (const entry of this.vaultEntries) {
 				const lower = entry.keyword.toLowerCase();
-				if (!this.lookupMap.has(lower)) {
-					this.entries.push(entry);
-					this.lookupMap.set(lower, entry.target);
-				}
+				if (this.lookupMap.has(lower)) continue;
+				if (this.blocklistSet.has(lower)) continue;
+				if (minLen > 0 && entry.keyword.length < minLen) continue;
+				this.entries.push(entry);
+				this.lookupMap.set(lower, entry.target);
 			}
 		}
 
@@ -623,15 +750,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		start: number;
 		typedText: string;
 	} | null {
-		const lowerText = textBefore.toLowerCase();
+		const normalizedText = this.normalize(textBefore);
 
 		for (const entry of this.entries) {
-			const kwLower = entry.keyword.toLowerCase();
-			const kwLen = kwLower.length;
-			if (lowerText.length < kwLen) continue;
+			const kwNorm = this.normalize(entry.keyword);
+			const kwLen = kwNorm.length;
+			if (normalizedText.length < kwLen) continue;
 
-			const start = lowerText.length - kwLen;
-			if (lowerText.substring(start) !== kwLower) continue;
+			const start = normalizedText.length - kwLen;
+			if (normalizedText.substring(start) !== kwNorm) continue;
 
 			if (start > 0) {
 				const ch = textBefore[start - 1];
@@ -680,6 +807,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.parseBlocklist();
 		this.parseManualKeywords();
 		if (this.settings.scanVaultLinks) {
 			this.scheduleScan();
@@ -699,7 +827,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "AutoLink Keywords" });
+		containerEl.createEl("h2", { text: "Linkosaurus" });
 
 		const desc = containerEl.createEl("div");
 		desc.style.marginBottom = "1em";
@@ -725,6 +853,20 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
+			.setName("Case-insensitive matching")
+			.setDesc(
+				"Match keywords regardless of upper/lower case (e.g. typing “dortmund” matches keyword “Dortmund”)."
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.caseInsensitive)
+					.onChange(async (value) => {
+						this.plugin.settings.caseInsensitive = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
 			.setName("Auto-detect vault links")
 			.setDesc(
 				"Automatically use all note names and existing wikilinks from the vault as keywords."
@@ -740,6 +882,97 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			});
 
 		if (this.plugin.settings.scanVaultLinks) {
+			new Setting(containerEl)
+				.setName("Include frontmatter aliases")
+				.setDesc(
+					"Use aliases defined in note frontmatter (aliases/alias field) as additional keywords."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(
+							this.plugin.settings.scanFrontmatterAliases
+						)
+						.onChange(async (value) => {
+							this.plugin.settings.scanFrontmatterAliases =
+								value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Minimum keyword length")
+				.setDesc(
+					"Ignore auto-detected keywords shorter than this (0 = no limit). Does not affect manual keywords."
+				)
+				.addText((text) => {
+					text.inputEl.type = "number";
+					text.inputEl.style.width = "60px";
+					text.inputEl.min = "0";
+					text.inputEl.max = "50";
+					text.setValue(
+						String(this.plugin.settings.minKeywordLength)
+					).onChange(async (value) => {
+						const num = parseInt(value, 10);
+						if (!isNaN(num) && num >= 0) {
+							this.plugin.settings.minKeywordLength = num;
+							await this.plugin.saveSettings();
+						}
+					});
+				});
+
+			new Setting(containerEl)
+				.setName("Blocklist")
+				.setDesc(
+					"Keywords to exclude from auto-linking (one per line). Does not affect manual keywords."
+				)
+				.addTextArea((text) => {
+					text.inputEl.style.fontFamily = "monospace";
+					text.inputEl.style.width = "100%";
+					text.inputEl.rows = 6;
+					text.setPlaceholder("Home\nTODO\nDaily")
+						.setValue(this.plugin.settings.blocklist)
+						.onChange((value) => {
+							this.plugin.settings.blocklist = value;
+							this.plugin.parseBlocklist();
+							this.plugin.parseManualKeywords();
+							this.plugin.debouncedSave();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Folder filter mode")
+				.setDesc(
+					"Choose whether the listed folders are excluded or are the only ones included."
+				)
+				.addDropdown((dropdown) => {
+					dropdown
+						.addOption("exclude", "Exclude listed folders")
+						.addOption("include", "Include only listed folders")
+						.setValue(this.plugin.settings.folderFilterMode)
+						.onChange(async (value: string) => {
+							this.plugin.settings.folderFilterMode =
+								value as "include" | "exclude";
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Folder filter")
+				.setDesc(
+					"Folders to include or exclude from vault scanning (one per line)."
+				)
+				.addTextArea((text) => {
+					text.inputEl.style.fontFamily = "monospace";
+					text.inputEl.style.width = "100%";
+					text.inputEl.rows = 4;
+					text.setPlaceholder("Templates\nDaily Notes")
+						.setValue(this.plugin.settings.folderFilter)
+						.onChange((value) => {
+							this.plugin.settings.folderFilter = value;
+							this.plugin.debouncedSave();
+						});
+				});
+
 			const vault = this.plugin.getVaultKeywords();
 			const details = containerEl.createEl("details");
 			details.style.marginTop = "0.5em";

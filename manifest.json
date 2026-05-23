@@ -1,9 +1,9 @@
 {
 	"id": "autolink-keywords",
-	"name": "AutoLink Keywords",
-	"version": "2.0.0",
+	"name": "Linkosaurus",
+	"version": "3.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Automatically converts keywords into Obsidian wikilinks as you type.",
-	"author": "AutoLink Keywords",
+	"author": "Linkosaurus",
 	"isDesktopOnly": false
 }
