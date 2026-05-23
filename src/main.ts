@@ -128,12 +128,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					);
 					return;
 				}
-				const replaced = this.replaceKeywordsInText(content, "", "");
+				const file = this.app.workspace.getActiveFile();
+				const selfName = file?.basename ?? "";
+				const replaced = this.replaceKeywordsInText(
+					content,
+					"",
+					"",
+					selfName
+				);
 				if (replaced === content) {
 					new Notice("No keywords found to link.");
 					return;
 				}
-				const cursor = editor.getCursor();
 				const lastLine = editor.lastLine();
 				const lastCh = editor.getLine(lastLine).length;
 				editor.replaceRange(
@@ -141,7 +147,6 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					{ line: 0, ch: 0 },
 					{ line: lastLine, ch: lastCh }
 				);
-				editor.setCursor(cursor);
 				new Notice("Keywords auto-linked.");
 			},
 		});
@@ -313,24 +318,23 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private replaceKeywordsInText(
 		text: string,
 		charBefore: string,
-		charAfter: string
+		charAfter: string,
+		skipKeyword?: string
 	): string {
 		const result: string[] = [];
 		const ci = this.settings.caseInsensitive;
 		const normalizedText = ci ? text.toLowerCase() : text;
+		const skipNorm = skipKeyword
+			? this.normalize(skipKeyword)
+			: undefined;
 		let i = 0;
 
 		if (text.startsWith("---\n") || text.startsWith("---\r\n")) {
 			const searchFrom = text.indexOf("\n") + 1;
-			const endIdx = text.indexOf("\n---", searchFrom);
-			if (endIdx !== -1) {
-				let fmEnd = endIdx + 4;
-				if (fmEnd < text.length && text[fmEnd] === "\n") fmEnd++;
-				else if (fmEnd < text.length && text[fmEnd] === "\r") {
-					fmEnd++;
-					if (fmEnd < text.length && text[fmEnd] === "\n")
-						fmEnd++;
-				}
+			const fmCloseRegex = /\n---[ \t]*(?:\n|$)/;
+			const match = fmCloseRegex.exec(text.substring(searchFrom));
+			if (match) {
+				const fmEnd = searchFrom + match.index + match[0].length;
 				result.push(text.substring(0, fmEnd));
 				i = fmEnd;
 			}
@@ -363,12 +367,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				continue;
 			}
 
-			if (text.charAt(i) === "[") {
-				const bracketClose = text.indexOf("](", i + 1);
-				if (bracketClose !== -1) {
+			if (text.charAt(i) === "[" && text.charAt(i + 1) !== "[") {
+				const closeBracket = text.indexOf("]", i + 1);
+				if (
+					closeBracket !== -1 &&
+					text.charAt(closeBracket + 1) === "("
+				) {
 					const parenClose = text.indexOf(
 						")",
-						bracketClose + 2
+						closeBracket + 2
 					);
 					if (parenClose !== -1) {
 						result.push(
@@ -392,10 +399,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				continue;
 			}
 
-			const lower7 = normalizedText.substring(i, i + 8);
+			const urlPrefix = normalizedText.substring(i, i + 8);
 			if (
-				lower7.startsWith("http://") ||
-				lower7.startsWith("https://")
+				urlPrefix.startsWith("http://") ||
+				urlPrefix.startsWith("https://")
 			) {
 				let end = i;
 				while (
@@ -443,6 +450,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					const kwNorm = ci
 						? entry.keyword.toLowerCase()
 						: entry.keyword;
+					if (skipNorm && kwNorm === skipNorm) continue;
 					const kwLen = kwNorm.length;
 					if (i + kwLen > text.length) continue;
 
