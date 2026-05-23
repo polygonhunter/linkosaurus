@@ -1,7 +1,7 @@
 {
 	"id": "autolink-keywords",
 	"name": "AutoLink Keywords",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"minAppVersion": "0.15.0",
 	"description": "Automatically converts keywords into Obsidian wikilinks as you type.",
 	"author": "AutoLink Keywords",

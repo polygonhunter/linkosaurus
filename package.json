@@ -1,6 +1,6 @@
 {
 	"name": "autolink-keywords",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"description": "Automatically converts keywords into Obsidian wikilinks as you type.",
 	"main": "main.js",
 	"type": "module",

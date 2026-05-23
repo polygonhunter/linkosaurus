@@ -303,11 +303,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				_toB: number,
 				inserted
 			) => {
-				if (
-					insertAt === -1 &&
-					toA === fromA &&
-					Math.abs(fromA - pending.to) <= 1
-				) {
+				if (insertAt === -1 && toA === fromA) {
 					insertedText = inserted.toString();
 					insertAt = fromA;
 				}
@@ -316,6 +312,16 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (!insertedText || insertAt === -1) {
 			this.clearPendingUndo();
+			return tr;
+		}
+
+		if (Math.abs(insertAt - pending.to) > 3) {
+			this.clearPendingUndo();
+			return tr;
+		}
+
+		if (/^\s+$/.test(insertedText)) {
+			pending.to += insertedText.length;
 			return tr;
 		}
 
