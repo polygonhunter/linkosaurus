@@ -21,6 +21,14 @@ function sanitize(text: string): string {
 	return text.replace(/\]\]/g, "");
 }
 
+interface PendingUndo {
+	from: number;
+	to: number;
+	typedText: string;
+	matchedKeywordLower: string;
+	timer: number;
+}
+
 export default class AutoLinkKeywordsPlugin extends Plugin {
 	settings: AutoLinkSettings = { ...DEFAULT_SETTINGS };
 	private entries: KeywordEntry[] = [];
@@ -30,19 +38,24 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private vaultEntries: KeywordEntry[] = [];
 	private scanTimer: number | null = null;
 	private saveTimer: number | null = null;
+	private pendingUndo: PendingUndo | null = null;
 
 	async onload() {
 		await this.loadSettings();
 		this.parseManualKeywords();
 
-		this.registerEditorExtension(
+		this.registerEditorExtension([
 			keymap.of([
 				{
 					key: "Space",
 					run: (view: EditorView) => this.handleSpace(view),
 				},
-			])
-		);
+			]),
+			EditorView.inputHandler.of(
+				(view: EditorView, from: number, to: number, text: string) =>
+					this.handleInput(view, from, to, text)
+			),
+		]);
 
 		this.addCommand({
 			id: "link-and-add-keyword",
@@ -197,7 +210,16 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.entries.sort((a, b) => b.keyword.length - a.keyword.length);
 	}
 
+	private clearPendingUndo() {
+		if (this.pendingUndo) {
+			window.clearTimeout(this.pendingUndo.timer);
+			this.pendingUndo = null;
+		}
+	}
+
 	private handleSpace(view: EditorView): boolean {
+		this.clearPendingUndo();
+
 		const state = view.state;
 		const sel = state.selection.main;
 		if (!sel.empty) return false;
@@ -238,10 +260,67 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				changes: { from: absStart, to: pos, insert },
 				selection: { anchor: absStart + insert.length },
 			});
+
+			const kwLower = direct.keyword.toLowerCase();
+			const prefix = kwLower + " ";
+			const hasLonger = this.entries.some(
+				(e) =>
+					e.keyword.length > direct.keyword.length &&
+					e.keyword.toLowerCase().startsWith(prefix)
+			);
+			if (hasLonger) {
+				this.pendingUndo = {
+					from: absStart,
+					to: absStart + insert.length,
+					typedText: direct.typedText,
+					matchedKeywordLower: kwLower,
+					timer: window.setTimeout(
+						() => (this.pendingUndo = null),
+						500
+					),
+				};
+			}
+
 			return true;
 		}
 
 		return false;
+	}
+
+	private handleInput(
+		view: EditorView,
+		from: number,
+		_to: number,
+		text: string
+	): boolean {
+		const pending = this.pendingUndo;
+		if (!pending) return false;
+
+		if (text.length !== 1 || from !== pending.to) {
+			this.clearPendingUndo();
+			return false;
+		}
+
+		const prefix =
+			pending.matchedKeywordLower + " " + text.toLowerCase();
+		const couldGrow = this.entries.some((e) =>
+			e.keyword.toLowerCase().startsWith(prefix)
+		);
+
+		if (!couldGrow) {
+			this.clearPendingUndo();
+			return false;
+		}
+
+		this.clearPendingUndo();
+		const restoreText = pending.typedText + " " + text;
+		view.dispatch({
+			changes: { from: pending.from, to: from, insert: restoreText },
+			selection: {
+				anchor: pending.from + restoreText.length,
+			},
+		});
+		return true;
 	}
 
 	private isInCodeContext(
@@ -301,7 +380,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 	private matchKeyword(
 		textBefore: string
-	): { keyword: string; target: string; start: number } | null {
+	): {
+		keyword: string;
+		target: string;
+		start: number;
+		typedText: string;
+	} | null {
 		const lowerText = textBefore.toLowerCase();
 
 		for (const entry of this.entries) {
@@ -328,6 +412,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				keyword: entry.keyword,
 				target: entry.target,
 				start,
+				typedText: textBefore.substring(start),
 			};
 		}
 
