@@ -278,7 +278,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					matchedKeywordLower: kwLower,
 					timer: window.setTimeout(
 						() => (this.pendingUndo = null),
-						500
+						1500
 					),
 				};
 			}
