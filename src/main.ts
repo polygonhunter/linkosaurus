@@ -75,6 +75,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					this.clearPendingUndo();
 				}
 			}),
+			EditorView.domEventHandlers({
+				paste: (event: ClipboardEvent, view: EditorView) => {
+					return this.handlePaste(event, view);
+				},
+			}),
 		]);
 
 		this.addCommand({
@@ -222,6 +227,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		const tripleSlash = this.matchTripleSlash(textBefore);
 		if (tripleSlash) {
+			const file = this.app.workspace.getActiveFile();
+			if (file && this.normalize(tripleSlash.target) === this.normalize(file.basename))
+				return false;
 			const absStart = line.from + tripleSlash.start;
 			const t = sanitize(tripleSlash.target);
 			const d = sanitize(tripleSlash.displayText);
@@ -235,6 +243,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		const direct = this.matchKeyword(textBefore);
 		if (direct) {
+			const file = this.app.workspace.getActiveFile();
+			if (file && this.normalize(direct.target) === this.normalize(file.basename))
+				return false;
 			const absStart = line.from + direct.start;
 			const kw = sanitize(direct.keyword);
 			const tg = sanitize(direct.target);
@@ -299,15 +310,51 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				? state.doc.sliceString(to, to + 1)
 				: "";
 
+		const file = this.app.workspace.getActiveFile();
+		const selfName = file?.basename ?? "";
 		const replaced = this.replaceKeywordsInText(
 			text,
 			charBefore,
-			charAfter
+			charAfter,
+			selfName
 		);
 		if (replaced === text) return false;
 
 		if (this.pendingUndo) this.clearPendingUndo();
 
+		view.dispatch({
+			changes: { from, to, insert: replaced },
+			selection: { anchor: from + replaced.length },
+		});
+		return true;
+	}
+
+	private handlePaste(event: ClipboardEvent, view: EditorView): boolean {
+		const text = event.clipboardData?.getData("text/plain");
+		if (!text || text.length > 10000) return false;
+		if (this.entries.length === 0) return false;
+
+		const state = view.state;
+		const { from, to } = state.selection.main;
+		const line = state.doc.lineAt(from);
+		const colOffset = from - line.from;
+
+		if (this.isInCodeContext(view, from, line.text, colOffset)) return false;
+		const textBefore = line.text.substring(0, colOffset);
+		if (this.isInsideWikilink(textBefore)) return false;
+
+		const file = this.app.workspace.getActiveFile();
+		const selfName = file?.basename ?? "";
+
+		const charBefore = from > 0 ? state.doc.sliceString(from - 1, from) : "";
+		const charAfter = to < state.doc.length ? state.doc.sliceString(to, to + 1) : "";
+
+		const replaced = this.replaceKeywordsInText(text, charBefore, charAfter, selfName);
+		if (replaced === text) return false;
+
+		if (this.pendingUndo) this.clearPendingUndo();
+
+		event.preventDefault();
 		view.dispatch({
 			changes: { from, to, insert: replaced },
 			selection: { anchor: from + replaced.length },
@@ -450,7 +497,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					const kwNorm = ci
 						? entry.keyword.toLowerCase()
 						: entry.keyword;
-					if (skipNorm && kwNorm === skipNorm) continue;
+					if (skipNorm && this.normalize(entry.target) === skipNorm) continue;
 					const kwLen = kwNorm.length;
 					if (i + kwLen > text.length) continue;
 
