@@ -967,8 +967,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (target === undefined) return null;
 
 		const preceding = textBefore.substring(0, idx);
-		const lastSpace = preceding.lastIndexOf(" ");
-		const displayStart = lastSpace + 1;
+		let displayStart = 0;
+		for (let j = preceding.length - 1; j >= 0; j--) {
+			if (!/[\p{L}\p{N}]/u.test(preceding.charAt(j))) {
+				displayStart = j + 1;
+				break;
+			}
+		}
 		const displayText = preceding.substring(displayStart);
 		if (!displayText) return null;
 
