@@ -90,6 +90,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				paste: (event: ClipboardEvent, view: EditorView) => {
 					return this.handlePaste(event, view);
 				},
+				keydown: (event: KeyboardEvent, view: EditorView): boolean => {
+					if (
+						event.key === "Enter" &&
+						!event.isComposing &&
+						!event.ctrlKey &&
+						!event.metaKey &&
+						!event.altKey
+					) {
+						return this.handleEnterKey(view);
+					}
+					return false;
+				},
 			}),
 		]);
 
@@ -217,6 +229,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return this.settings.caseInsensitive ? text.toLowerCase() : text;
 	}
 
+	private static PUNCTUATION_TRIGGERS = ").,!?:;";
+
 	private handleInput(
 		view: EditorView,
 		from: number,
@@ -233,17 +247,43 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (this.pendingUndo) {
 			if (/^\s+$/.test(text)) return false;
+			if (AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(text)) {
+				this.clearPendingUndo();
+				return false;
+			}
 			return this.handleUndoOnContinue(view, from, text);
 		}
 
 		if (text === " ") {
-			return this.handleSpaceInput(view, from);
+			return this.tryAutolinkBeforeCursor(view, from, " ", true);
+		}
+
+		if (AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(text)) {
+			return this.tryAutolinkBeforeCursor(view, from, text, false);
 		}
 
 		return false;
 	}
 
-	private handleSpaceInput(view: EditorView, pos: number): boolean {
+	private handleEnterKey(view: EditorView): boolean {
+		if (this.pendingUndo) {
+			this.clearPendingUndo();
+			return false;
+		}
+
+		const sel = view.state.selection.main;
+		if (!sel.empty) return false;
+
+		this.tryAutolinkBeforeCursor(view, sel.head, "", false);
+		return false;
+	}
+
+	private tryAutolinkBeforeCursor(
+		view: EditorView,
+		pos: number,
+		trailing: string,
+		setupPendingUndo: boolean
+	): boolean {
 		const state = view.state;
 		const line = state.doc.lineAt(pos);
 		const colOffset = pos - line.from;
@@ -261,7 +301,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const absStart = line.from + alias.start;
 			const t = sanitize(alias.target);
 			const d = sanitize(alias.displayText);
-			const insert = `[[${t}|${d}]] `;
+			const insert = `[[${t}|${d}]]${trailing}`;
 			view.dispatch({
 				changes: { from: absStart, to: pos, insert },
 				selection: { anchor: absStart + insert.length },
@@ -279,32 +319,34 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const tg = sanitize(direct.target);
 			const insert =
 				kw.toLowerCase() === tg.toLowerCase()
-					? `[[${kw}]] `
-					: `[[${tg}|${kw}]] `;
+					? `[[${kw}]]${trailing}`
+					: `[[${tg}|${kw}]]${trailing}`;
 			view.dispatch({
 				changes: { from: absStart, to: pos, insert },
 				selection: { anchor: absStart + insert.length },
 			});
 
-			const kwNorm = this.normalize(direct.keyword);
-			const prefix = kwNorm + " ";
-			const hasLonger = this.entries.some((e) => {
-				const norm = this.normalize(e.keyword);
-				return (
-					norm.length > kwNorm.length && norm.startsWith(prefix)
-				);
-			});
-			if (hasLonger) {
-				this.clearPendingUndo();
-				this.pendingUndo = {
-					from: absStart,
-					typedText: direct.typedText,
-					matchedKeywordNorm: kwNorm,
-					timer: window.setTimeout(
-						() => (this.pendingUndo = null),
-						5000
-					),
-				};
+			if (setupPendingUndo) {
+				const kwNorm = this.normalize(direct.keyword);
+				const prefix = kwNorm + " ";
+				const hasLonger = this.entries.some((e) => {
+					const norm = this.normalize(e.keyword);
+					return (
+						norm.length > kwNorm.length && norm.startsWith(prefix)
+					);
+				});
+				if (hasLonger) {
+					this.clearPendingUndo();
+					this.pendingUndo = {
+						from: absStart,
+						typedText: direct.typedText,
+						matchedKeywordNorm: kwNorm,
+						timer: window.setTimeout(
+							() => (this.pendingUndo = null),
+							5000
+						),
+					};
+				}
 			}
 
 			return true;
@@ -925,8 +967,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (target === undefined) return null;
 
 		const preceding = textBefore.substring(0, idx);
-		const lastSpace = preceding.lastIndexOf(" ");
-		const displayStart = lastSpace + 1;
+		let displayStart = 0;
+		for (let j = preceding.length - 1; j >= 0; j--) {
+			if (!/[\p{L}\p{N}]/u.test(preceding.charAt(j))) {
+				displayStart = j + 1;
+				break;
+			}
+		}
 		const displayText = preceding.substring(displayStart);
 		if (!displayText) return null;
 
@@ -1079,8 +1126,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (normalizedText.substring(start) !== kwNorm) continue;
 
 			if (start > 0) {
-				const ch = textBefore[start - 1];
-				if (ch !== " " && ch !== "\t") continue;
+				const ch = textBefore.charAt(start - 1);
+				if (/[\p{L}\p{N}]/u.test(ch)) continue;
 			}
 
 			if (textBefore.substring(start, start + 2) === "[[") continue;
