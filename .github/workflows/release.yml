@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
-  attestations: write
 
 jobs:
   release:
@@ -30,13 +28,6 @@ jobs:
       - name: Get version from manifest
         id: version
         run: echo "version=$(jq -r .version manifest.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            main.js
-            manifest.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
