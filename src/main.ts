@@ -136,7 +136,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				const safe = sanitize(text);
 				editor.replaceSelection(`[[${safe}]]`);
 
-				if (!this.manualLookup.has(text.toLowerCase())) {
+				if (!this.manualLookup.has(this.normalize(text))) {
 					const list = this.settings.keywordList.trimEnd();
 					const sep = list ? "\n" : "";
 					this.settings.keywordList = list + sep + text;
@@ -756,9 +756,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 			const noteName = file.basename.trim();
 			if (!noteName) continue;
-			const lower = noteName.toLowerCase();
-			if (!seen.has(lower) && !this.manualLookup.has(lower)) {
-				seen.add(lower);
+			const norm = this.normalize(noteName);
+			if (!seen.has(norm) && !this.manualLookup.has(norm)) {
+				seen.add(norm);
 				this.vaultEntries.push({
 					keyword: noteName,
 					target: noteName,
@@ -778,12 +778,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				for (const alias of aliasList) {
 					const a = String(alias).trim();
 					if (!a) continue;
-					const aLower = a.toLowerCase();
+					const aNorm = this.normalize(a);
 					if (
-						!seen.has(aLower) &&
-						!this.manualLookup.has(aLower)
+						!seen.has(aNorm) &&
+						!this.manualLookup.has(aNorm)
 					) {
-						seen.add(aLower);
+						seen.add(aNorm);
 						this.vaultEntries.push({
 							keyword: a,
 							target: noteName,
@@ -803,13 +803,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 						raw.includes("/") ? raw.split("/").pop()! : raw
 					).trim();
 					if (!linkName) continue;
-					const linkLower = linkName.toLowerCase();
+					const linkNorm = this.normalize(linkName);
 					if (
-						seen.has(linkLower) ||
-						this.manualLookup.has(linkLower)
+						seen.has(linkNorm) ||
+						this.manualLookup.has(linkNorm)
 					)
 						continue;
-					seen.add(linkLower);
+					seen.add(linkNorm);
 
 					this.vaultEntries.push({
 						keyword: linkName,
@@ -836,11 +836,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				const target = line.substring(eqIdx + 1).trim();
 				if (kw && target) {
 					this.manualEntries.push({ keyword: kw, target });
-					this.manualLookup.set(kw.toLowerCase(), target);
+					this.manualLookup.set(this.normalize(kw), target);
 				}
 			} else {
 				this.manualEntries.push({ keyword: line, target: line });
-				this.manualLookup.set(line.toLowerCase(), line);
+				this.manualLookup.set(this.normalize(line), line);
 			}
 		}
 
@@ -852,7 +852,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		for (const raw of this.settings.blocklist.split("\n")) {
 			const line = raw.trim();
 			if (line) {
-				this.blocklistSet.add(line.toLowerCase());
+				this.blocklistSet.add(this.normalize(line));
 			}
 		}
 	}
@@ -873,19 +873,19 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.lookupMap = new Map();
 
 		for (const entry of this.manualEntries) {
-			const lower = entry.keyword.toLowerCase();
+			const norm = this.normalize(entry.keyword);
 			this.entries.push(entry);
-			this.lookupMap.set(lower, entry.target);
+			this.lookupMap.set(norm, entry.target);
 		}
 
 		if (this.settings.scanVaultLinks) {
 			for (const entry of this.vaultEntries) {
-				const lower = entry.keyword.toLowerCase();
-				if (this.lookupMap.has(lower)) continue;
-				if (this.blocklistSet.has(lower)) continue;
+				const norm = this.normalize(entry.keyword);
+				if (this.lookupMap.has(norm)) continue;
+				if (this.blocklistSet.has(norm)) continue;
 				if (minLen > 0 && entry.keyword.length < minLen) continue;
 				this.entries.push(entry);
-				this.lookupMap.set(lower, entry.target);
+				this.lookupMap.set(norm, entry.target);
 			}
 		}
 
@@ -963,7 +963,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const targetKw = textBefore.substring(idx + delim.length);
 		if (!targetKw) return null;
 
-		const target = this.lookupMap.get(targetKw.toLowerCase());
+		const target = this.lookupMap.get(this.normalize(targetKw));
 		if (target === undefined) return null;
 
 		const preceding = textBefore.substring(0, idx);
@@ -993,7 +993,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const targetKw = textBefore.substring(secondIdx + delim.length);
 		if (!targetKw) return null;
 
-		const target = this.lookupMap.get(targetKw.toLowerCase());
+		const target = this.lookupMap.get(this.normalize(targetKw));
 		if (target === undefined) return null;
 
 		const beforeSecond = textBefore.substring(0, secondIdx);
@@ -1065,7 +1065,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const targetKw = text.substring(targetStart, targetEnd);
 		if (!targetKw) return null;
 
-		const target = this.lookupMap.get(targetKw.toLowerCase());
+		const target = this.lookupMap.get(this.normalize(targetKw));
 		if (target === undefined) return null;
 		if (skipNorm && this.normalize(target) === skipNorm) return null;
 
@@ -1098,7 +1098,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const targetKw = text.substring(targetStart, targetEnd);
 		if (!targetKw) return null;
 
-		const target = this.lookupMap.get(targetKw.toLowerCase());
+		const target = this.lookupMap.get(this.normalize(targetKw));
 		if (target === undefined) return null;
 		if (skipNorm && this.normalize(target) === skipNorm) return null;
 
