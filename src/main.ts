@@ -11,6 +11,8 @@ interface AutoLinkSettings {
 	minKeywordLength: number;
 	folderFilter: string;
 	folderFilterMode: "include" | "exclude";
+	periodicRelink: boolean;
+	periodicRelinkIntervalMinutes: number;
 }
 
 const DEFAULT_SETTINGS: AutoLinkSettings = {
@@ -22,6 +24,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	minKeywordLength: 0,
 	folderFilter: "",
 	folderFilterMode: "exclude",
+	periodicRelink: false,
+	periodicRelinkIntervalMinutes: 5,
 };
 
 interface KeywordEntry {
@@ -51,6 +55,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private scanTimer: number | null = null;
 	private saveTimer: number | null = null;
 	private pendingUndo: PendingUndo | null = null;
+	private relinkTimer: number | null = null;
+	private relinkDebounceTimer: number | null = null;
+	private relinking = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -156,10 +163,19 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "relink-all-notes",
+			name: "Auto-link keywords in all notes",
+			callback: () => {
+				this.relinkVault(true);
+			},
+		});
+
 		this.addSettingTab(new AutoLinkSettingTab(this.app, this));
 
 		this.app.workspace.onLayoutReady(() => {
 			this.scheduleScan();
+			this.startPeriodicRelink();
 		});
 
 		this.registerEvent(
@@ -169,19 +185,27 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.app.metadataCache.on("changed", () => this.scheduleScan())
 		);
 		this.registerEvent(
-			this.app.vault.on("create", () => this.scheduleScan())
+			this.app.vault.on("create", () => {
+				this.scheduleScan();
+				this.scheduleRelinkDebounced();
+			})
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", () => this.scheduleScan())
 		);
 		this.registerEvent(
-			this.app.vault.on("rename", () => this.scheduleScan())
+			this.app.vault.on("rename", () => {
+				this.scheduleScan();
+				this.scheduleRelinkDebounced();
+			})
 		);
 	}
 
 	onunload() {
 		if (this.scanTimer !== null) window.clearTimeout(this.scanTimer);
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.stopPeriodicRelink();
+		if (this.relinkDebounceTimer !== null) window.clearTimeout(this.relinkDebounceTimer);
 		this.clearPendingUndo();
 	}
 
@@ -582,6 +606,73 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.pendingUndo) {
 			window.clearTimeout(this.pendingUndo.timer);
 			this.pendingUndo = null;
+		}
+	}
+
+	startPeriodicRelink() {
+		this.stopPeriodicRelink();
+		if (!this.settings.periodicRelink) return;
+		const ms = this.settings.periodicRelinkIntervalMinutes * 60 * 1000;
+		this.relinkTimer = window.setInterval(() => {
+			this.relinkVault(false);
+		}, ms);
+	}
+
+	stopPeriodicRelink() {
+		if (this.relinkTimer !== null) {
+			window.clearInterval(this.relinkTimer);
+			this.relinkTimer = null;
+		}
+	}
+
+	private scheduleRelinkDebounced() {
+		if (!this.settings.periodicRelink) return;
+		if (this.relinkDebounceTimer !== null) window.clearTimeout(this.relinkDebounceTimer);
+		this.relinkDebounceTimer = window.setTimeout(() => {
+			this.relinkDebounceTimer = null;
+			this.relinkVault(false);
+		}, 5000);
+	}
+
+	private async relinkVault(showNotice: boolean) {
+		if (this.relinking) return;
+		if (this.entries.length === 0) return;
+		this.relinking = true;
+
+		try {
+			const activeFile = this.app.workspace.getActiveFile();
+			const openFiles = new Set<string>();
+			this.app.workspace.iterateAllLeaves((leaf) => {
+				const viewState = leaf.view?.getState();
+				if (viewState?.file) openFiles.add(viewState.file as string);
+			});
+
+			const files = this.app.vault.getMarkdownFiles();
+			let totalLinked = 0;
+
+			for (const file of files) {
+				if (openFiles.has(file.path)) continue;
+				if (activeFile && file.path === activeFile.path) continue;
+
+				const content = await this.app.vault.read(file);
+				if (content.length > 100000) continue;
+
+				const replaced = this.replaceKeywordsInText(content, "", "", file.basename);
+				if (replaced === content) continue;
+
+				await this.app.vault.modify(file, replaced);
+				totalLinked++;
+			}
+
+			if (showNotice) {
+				new Notice(
+					totalLinked > 0
+						? `Linkosaurus: Auto-linked keywords in ${totalLinked} note${totalLinked === 1 ? "" : "s"}.`
+						: "Linkosaurus: No keywords found to link."
+				);
+			}
+		} finally {
+			this.relinking = false;
 		}
 	}
 
@@ -1044,6 +1135,53 @@ class AutoLinkSettingTab extends PluginSettingTab {
 							this.plugin.debouncedSave();
 						});
 				});
+
+			containerEl.createEl("h3", { text: "Periodic auto-relink" });
+
+			new Setting(containerEl)
+				.setName("Enable periodic auto-relink")
+				.setDesc(
+					"Periodically scan all notes and retroactively convert plain-text keywords to wikilinks. " +
+					"Notes currently open in the editor are skipped to avoid cursor jumps."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.periodicRelink)
+						.onChange(async (value) => {
+							this.plugin.settings.periodicRelink = value;
+							await this.plugin.saveSettings();
+							if (value) {
+								this.plugin.startPeriodicRelink();
+							} else {
+								this.plugin.stopPeriodicRelink();
+							}
+							this.display();
+						});
+				});
+
+			if (this.plugin.settings.periodicRelink) {
+				new Setting(containerEl)
+					.setName("Relink interval (minutes)")
+					.setDesc(
+						"How often to scan the vault for unlinkable keywords (1–60 minutes)."
+					)
+					.addText((text) => {
+						text.inputEl.type = "number";
+						text.inputEl.style.width = "60px";
+						text.inputEl.min = "1";
+						text.inputEl.max = "60";
+						text.setValue(
+							String(this.plugin.settings.periodicRelinkIntervalMinutes)
+						).onChange(async (value) => {
+							const num = parseInt(value, 10);
+							if (!isNaN(num) && num >= 1 && num <= 60) {
+								this.plugin.settings.periodicRelinkIntervalMinutes = num;
+								await this.plugin.saveSettings();
+								this.plugin.startPeriodicRelink();
+							}
+						});
+					});
+			}
 
 			const vault = this.plugin.getVaultKeywords();
 			const details = containerEl.createEl("details");
