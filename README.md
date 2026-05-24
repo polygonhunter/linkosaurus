@@ -73,6 +73,19 @@ Set a minimum length for auto-detected keywords to prevent accidental linking of
 
 Control which folders are included or excluded from vault scanning. Ideal for keeping Templates, Daily Notes, or archive folders out of auto-linking.
 
+### Periodic auto-relink
+
+When a new note is created (e.g. `Kerstin.md`), existing notes that mention "Kerstin" as plain text still won't have a link — because the keyword didn't exist when they were written. Periodic auto-relink fixes this: it scans your entire vault at a configurable interval (1–60 minutes) and retroactively converts plain-text keywords to wikilinks.
+
+- **Disabled by default** — enable in settings
+- Also triggers automatically (with debounce) when a note is created or renamed
+- Notes currently open in the editor are skipped to avoid cursor jumps
+- Respects all existing rules: blocklist, self-link prevention, code blocks, frontmatter, URLs
+
+### Vault-wide auto-link command
+
+The command **"Auto-link keywords in all notes"** scans every note in the vault and links all recognized keywords at once — a manual one-shot alternative to periodic auto-relink. Open notes are skipped.
+
 ### Shortcut command
 
 Select a word (or place the cursor on it) and run **"Link selection and add to keyword list"** — the word is linked immediately and added to the keyword list at the same time. Assignable to a hotkey under Settings → Hotkeys.
@@ -113,6 +126,8 @@ NAS = UGREEN NAS
 | **Blocklist** | Keywords excluded from auto-linking |
 | **Folder filter mode** | Include or exclude folders |
 | **Folder filter** | List of folders to filter |
+| **Enable periodic auto-relink** | Periodically scan all notes and retroactively link keywords (off by default) |
+| **Relink interval (minutes)** | How often to scan the vault (1–60 minutes, default: 5) |
 
 ---
 
