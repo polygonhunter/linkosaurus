@@ -19,15 +19,23 @@ Type a keyword and press Space — Linkosaurus recognizes it instantly and creat
 | `Dortmund ` | `[[Dortmund]] ` |
 | `NAS ` | `[[UGREEN NAS\|NAS]] ` (with alias mapping) |
 
-### Alias syntax with `///`
+### Alias syntax
 
 Create links with custom display text while writing. Perfect for natural reading flow.
 
+**Single-word alias** (default delimiter `//`):
+
 | You type | Result |
 |----------|--------|
-| `traveling///Dortmund ` | `[[Dortmund\|traveling]] ` |
+| `York//Urlaub ` | `[[Urlaub\|York]] ` |
 
-Only works when the target keyword exists in the keyword list.
+**Multi-word alias** (default delimiter `///`):
+
+| You type | Result |
+|----------|--------|
+| `///New York///Urlaub ` | `[[Urlaub\|New York]] ` |
+
+Only works when the target keyword exists in the keyword list. Both delimiters are configurable in the settings.
 
 ### Multi-word keywords
 
@@ -120,6 +128,8 @@ NAS = UGREEN NAS
 |---------|-------------|
 | **Keyword list** | Text area for manually defined keywords |
 | **Case-insensitive matching** | Ignore upper/lower case when matching |
+| **Single-word alias delimiter** | Delimiter for single-word aliases (default `//`) |
+| **Multi-word alias delimiter** | Delimiter for multi-word aliases (default `///`) |
 | **Auto-detect vault links** | Automatically use all note names as keywords |
 | **Include frontmatter aliases** | Use aliases from frontmatter as keywords |
 | **Minimum keyword length** | Minimum length for auto-detected keywords (0 = no limit) |
