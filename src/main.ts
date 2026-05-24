@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
@@ -13,6 +13,8 @@ interface AutoLinkSettings {
 	folderFilterMode: "include" | "exclude";
 	periodicRelink: boolean;
 	periodicRelinkIntervalMinutes: number;
+	singleWordDelimiter: string;
+	multiWordDelimiter: string;
 }
 
 const DEFAULT_SETTINGS: AutoLinkSettings = {
@@ -26,6 +28,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	folderFilterMode: "exclude",
 	periodicRelink: false,
 	periodicRelinkIntervalMinutes: 5,
+	singleWordDelimiter: "//",
+	multiWordDelimiter: "///",
 };
 
 interface KeywordEntry {
@@ -249,14 +253,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
 		if (this.isInsideWikilink(textBefore)) return false;
 
-		const tripleSlash = this.matchTripleSlash(textBefore);
-		if (tripleSlash) {
+		const alias = this.matchAlias(textBefore);
+		if (alias) {
 			const file = this.app.workspace.getActiveFile();
-			if (file && this.normalize(tripleSlash.target) === this.normalize(file.basename))
+			if (file && this.normalize(alias.target) === this.normalize(file.basename))
 				return false;
-			const absStart = line.from + tripleSlash.start;
-			const t = sanitize(tripleSlash.target);
-			const d = sanitize(tripleSlash.displayText);
+			const absStart = line.from + alias.start;
+			const t = sanitize(alias.target);
+			const d = sanitize(alias.displayText);
 			const insert = `[[${t}|${d}]] `;
 			view.dispatch({
 				changes: { from: absStart, to: pos, insert },
@@ -483,6 +487,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					end++;
 				result.push(text.substring(i, end));
 				i = end;
+				continue;
+			}
+
+			const aliasMatch = this.matchAliasInText(text, i, skipNorm);
+			if (aliasMatch) {
+				result.push(aliasMatch.replacement);
+				i = aliasMatch.end;
 				continue;
 			}
 
@@ -870,13 +881,44 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return lastOpen > lastClose;
 	}
 
-	private matchTripleSlash(
+	private matchAlias(
 		textBefore: string
 	): { displayText: string; target: string; start: number } | null {
-		const idx = textBefore.lastIndexOf("///");
-		if (idx === -1) return null;
+		const sw = this.settings.singleWordDelimiter;
+		const mw = this.settings.multiWordDelimiter;
 
-		const targetKw = textBefore.substring(idx + 3);
+		type Check = { kind: "single" | "multi"; delim: string };
+		const checks: Check[] = [];
+		if (sw.length > mw.length) {
+			checks.push({ kind: "single", delim: sw });
+			checks.push({ kind: "multi", delim: mw });
+		} else if (sw.length < mw.length) {
+			checks.push({ kind: "multi", delim: mw });
+			checks.push({ kind: "single", delim: sw });
+		} else {
+			checks.push({ kind: "multi", delim: mw });
+			checks.push({ kind: "single", delim: sw });
+		}
+
+		for (const check of checks) {
+			const result =
+				check.kind === "multi"
+					? this.matchMultiWordAlias(textBefore, check.delim)
+					: this.matchSingleWordAlias(textBefore, check.delim);
+			if (result) return result;
+		}
+		return null;
+	}
+
+	private matchSingleWordAlias(
+		textBefore: string,
+		delim: string
+	): { displayText: string; target: string; start: number } | null {
+		const idx = textBefore.lastIndexOf(delim);
+		if (idx === -1) return null;
+		if (idx > 0 && textBefore.charAt(idx - 1) === ":") return null;
+
+		const targetKw = textBefore.substring(idx + delim.length);
 		if (!targetKw) return null;
 
 		const target = this.lookupMap.get(targetKw.toLowerCase());
@@ -892,6 +934,130 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			return null;
 
 		return { displayText, target, start: displayStart };
+	}
+
+	private matchMultiWordAlias(
+		textBefore: string,
+		delim: string
+	): { displayText: string; target: string; start: number } | null {
+		const secondIdx = textBefore.lastIndexOf(delim);
+		if (secondIdx === -1) return null;
+
+		const targetKw = textBefore.substring(secondIdx + delim.length);
+		if (!targetKw) return null;
+
+		const target = this.lookupMap.get(targetKw.toLowerCase());
+		if (target === undefined) return null;
+
+		const beforeSecond = textBefore.substring(0, secondIdx);
+		const firstIdx = beforeSecond.lastIndexOf(delim);
+		if (firstIdx === -1) return null;
+		if (firstIdx > 0 && textBefore.charAt(firstIdx - 1) === ":") return null;
+
+		const displayText = beforeSecond.substring(firstIdx + delim.length);
+		if (!displayText) return null;
+
+		if (textBefore.substring(firstIdx, firstIdx + 2) === "[[")
+			return null;
+
+		return { displayText, target, start: firstIdx };
+	}
+
+	private matchAliasInText(
+		text: string,
+		pos: number,
+		skipNorm?: string
+	): { replacement: string; end: number } | null {
+		const sw = this.settings.singleWordDelimiter;
+		const mw = this.settings.multiWordDelimiter;
+
+		type Check = { kind: "single" | "multi"; delim: string };
+		const checks: Check[] = [];
+		if (sw.length > mw.length) {
+			checks.push({ kind: "single", delim: sw });
+			checks.push({ kind: "multi", delim: mw });
+		} else if (sw.length < mw.length) {
+			checks.push({ kind: "multi", delim: mw });
+			checks.push({ kind: "single", delim: sw });
+		} else {
+			checks.push({ kind: "multi", delim: mw });
+			checks.push({ kind: "single", delim: sw });
+		}
+
+		for (const check of checks) {
+			const result =
+				check.kind === "multi"
+					? this.matchMultiWordAliasInText(text, pos, check.delim, skipNorm)
+					: this.matchSingleWordAliasInText(text, pos, check.delim, skipNorm);
+			if (result) return result;
+		}
+		return null;
+	}
+
+	private matchSingleWordAliasInText(
+		text: string,
+		pos: number,
+		delim: string,
+		skipNorm?: string
+	): { replacement: string; end: number } | null {
+		if (pos > 0 && /[\p{L}\p{N}]/u.test(text.charAt(pos - 1))) return null;
+
+		const spaceAfterWord = text.indexOf(delim, pos);
+		if (spaceAfterWord === -1 || spaceAfterWord === pos) return null;
+
+		const displayText = text.substring(pos, spaceAfterWord);
+		if (/\s/.test(displayText)) return null;
+		if (displayText.startsWith("[[")) return null;
+		if (spaceAfterWord > 0 && text.charAt(spaceAfterWord - 1) === ":") return null;
+
+		const targetStart = spaceAfterWord + delim.length;
+		let targetEnd = targetStart;
+		while (targetEnd < text.length && !/\s/.test(text.charAt(targetEnd)))
+			targetEnd++;
+
+		const targetKw = text.substring(targetStart, targetEnd);
+		if (!targetKw) return null;
+
+		const target = this.lookupMap.get(targetKw.toLowerCase());
+		if (target === undefined) return null;
+		if (skipNorm && this.normalize(target) === skipNorm) return null;
+
+		const t = sanitize(target);
+		const d = sanitize(displayText);
+		return { replacement: `[[${t}|${d}]]`, end: targetEnd };
+	}
+
+	private matchMultiWordAliasInText(
+		text: string,
+		pos: number,
+		delim: string,
+		skipNorm?: string
+	): { replacement: string; end: number } | null {
+		if (text.substring(pos, pos + delim.length) !== delim) return null;
+		if (pos > 0 && text.charAt(pos - 1) === ":") return null;
+
+		const afterFirst = pos + delim.length;
+		const secondIdx = text.indexOf(delim, afterFirst);
+		if (secondIdx === -1) return null;
+
+		const displayText = text.substring(afterFirst, secondIdx);
+		if (!displayText) return null;
+
+		const targetStart = secondIdx + delim.length;
+		let targetEnd = targetStart;
+		while (targetEnd < text.length && !/\s/.test(text.charAt(targetEnd)))
+			targetEnd++;
+
+		const targetKw = text.substring(targetStart, targetEnd);
+		if (!targetKw) return null;
+
+		const target = this.lookupMap.get(targetKw.toLowerCase());
+		if (target === undefined) return null;
+		if (skipNorm && this.normalize(target) === skipNorm) return null;
+
+		const t = sanitize(target);
+		const d = sanitize(displayText);
+		return { replacement: `[[${t}|${d}]]`, end: targetEnd };
 	}
 
 	private matchKeyword(
@@ -966,6 +1132,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.folderFilterMode !== "exclude"
 		)
 			this.settings.folderFilterMode = "exclude";
+		if (typeof this.settings.singleWordDelimiter !== "string" || !this.settings.singleWordDelimiter)
+			this.settings.singleWordDelimiter = DEFAULT_SETTINGS.singleWordDelimiter;
+		if (typeof this.settings.multiWordDelimiter !== "string" || !this.settings.multiWordDelimiter)
+			this.settings.multiWordDelimiter = DEFAULT_SETTINGS.multiWordDelimiter;
 	}
 
 	async saveSettings() {
@@ -998,7 +1168,9 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			"One keyword per line. Lines starting with <code>#</code> are comments.<br>" +
 			"<code>Dortmund</code> → <code>[[Dortmund]]</code><br>" +
 			"<code>NAS = UGREEN NAS</code> → <code>[[UGREEN NAS|NAS]]</code><br><br>" +
-			"<b>Alias syntax:</b> type <code>displayText///keyword</code> then Space → <code>[[target|displayText]]</code><br><br>" +
+			"<b>Single-word alias:</b> <code>York//keyword</code> + Space → <code>[[target|York]]</code><br>" +
+			"<b>Multi-word alias:</b> <code>///New York///keyword</code> + Space → <code>[[target|New York]]</code><br>" +
+			"Delimiters are configurable below.<br><br>" +
 			"<b>Shortcut:</b> select a word and use the <em>Link selection and add to keyword list</em> command " +
 			"(assign a hotkey in Settings → Hotkeys).";
 
@@ -1026,6 +1198,72 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.caseInsensitive = value;
 						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Single-word alias delimiter")
+			.setDesc(
+				"Delimiter between display text and keyword for single-word aliases. " +
+				"Example: York//Urlaub → [[Urlaub|York]]"
+			)
+			.addText((text) => {
+				text.inputEl.style.width = "80px";
+				text.inputEl.style.fontFamily = "monospace";
+				text.setPlaceholder("//")
+					.setValue(this.plugin.settings.singleWordDelimiter)
+					.onChange(async (value) => {
+						if (!value) {
+							text.inputEl.style.borderColor = "var(--text-error)";
+							return;
+						}
+						if (value === this.plugin.settings.multiWordDelimiter) {
+							text.inputEl.style.borderColor = "var(--text-error)";
+							new Notice("Single-word and multi-word delimiters must be different.");
+							return;
+						}
+						text.inputEl.style.borderColor = "";
+						this.plugin.settings.singleWordDelimiter = value;
+						await this.plugin.saveSettings();
+						if (
+							value.includes(this.plugin.settings.multiWordDelimiter) ||
+							this.plugin.settings.multiWordDelimiter.includes(value)
+						) {
+							new Notice("Warning: one delimiter is a substring of the other. This may cause parsing conflicts.");
+						}
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Multi-word alias delimiter")
+			.setDesc(
+				"Delimiter that wraps display text for multi-word aliases. " +
+				"Example: ///New York///Urlaub → [[Urlaub|New York]]"
+			)
+			.addText((text) => {
+				text.inputEl.style.width = "80px";
+				text.inputEl.style.fontFamily = "monospace";
+				text.setPlaceholder("///")
+					.setValue(this.plugin.settings.multiWordDelimiter)
+					.onChange(async (value) => {
+						if (!value) {
+							text.inputEl.style.borderColor = "var(--text-error)";
+							return;
+						}
+						if (value === this.plugin.settings.singleWordDelimiter) {
+							text.inputEl.style.borderColor = "var(--text-error)";
+							new Notice("Single-word and multi-word delimiters must be different.");
+							return;
+						}
+						text.inputEl.style.borderColor = "";
+						this.plugin.settings.multiWordDelimiter = value;
+						await this.plugin.saveSettings();
+						if (
+							value.includes(this.plugin.settings.singleWordDelimiter) ||
+							this.plugin.settings.singleWordDelimiter.includes(value)
+						) {
+							new Notice("Warning: one delimiter is a substring of the other. This may cause parsing conflicts.");
+						}
 					});
 			});
 
