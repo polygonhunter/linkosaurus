@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
