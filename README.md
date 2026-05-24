@@ -2,7 +2,7 @@
 
 **Your vault links itself.**
 
-Linkosaurus turns Obsidian into a smart note-taking system that automatically detects connections between your thoughts — while you type, dictate, or paste. No more manual `[[`. No interrupting your writing flow. Just type a keyword, press Space (or Enter, or a punctuation mark), and the link appears.
+Linkosaurus turns Obsidian into a smart note-taking system that automatically detects connections between your thoughts — while you type, dictate, or paste. No more manual `[[`. No interrupting your writing flow. Just type a keyword, press Space, and the link appears.
 
 Works on desktop and mobile (iOS/Android).
 
@@ -12,17 +12,12 @@ Works on desktop and mobile (iOS/Android).
 
 ### Auto-link while typing
 
-Type a keyword and press Space, Enter, or any common punctuation — Linkosaurus recognizes it instantly and creates the matching wikilink.
+Type a keyword and press Space — Linkosaurus recognizes it instantly and creates the matching wikilink.
 
 | You type | Result |
 |----------|--------|
 | `Dortmund ` | `[[Dortmund]] ` |
 | `NAS ` | `[[UGREEN NAS\|NAS]] ` (with alias mapping) |
-| `Dortmund.` | `[[Dortmund]].` |
-| `(Dortmund)` | `([[Dortmund]])` |
-| `Dortmund⏎` | `[[Dortmund]]` + new line |
-
-Supported triggers: Space, Enter, `)` `.` `,` `!` `?` `:` `;`
 
 ### Alias syntax
 
