@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 
@@ -57,6 +57,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private pendingUndo: PendingUndo | null = null;
 	private relinkTimer: number | null = null;
 	private relinkDebounceTimer: number | null = null;
+	private relinking = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -634,38 +635,44 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	}
 
 	private async relinkVault(showNotice: boolean) {
+		if (this.relinking) return;
 		if (this.entries.length === 0) return;
+		this.relinking = true;
 
-		const activeFile = this.app.workspace.getActiveFile();
-		const openFiles = new Set<string>();
-		this.app.workspace.iterateAllLeaves((leaf) => {
-			const viewState = leaf.view?.getState();
-			if (viewState?.file) openFiles.add(viewState.file as string);
-		});
+		try {
+			const activeFile = this.app.workspace.getActiveFile();
+			const openFiles = new Set<string>();
+			this.app.workspace.iterateAllLeaves((leaf) => {
+				const viewState = leaf.view?.getState();
+				if (viewState?.file) openFiles.add(viewState.file as string);
+			});
 
-		const files = this.app.vault.getMarkdownFiles();
-		let totalLinked = 0;
+			const files = this.app.vault.getMarkdownFiles();
+			let totalLinked = 0;
 
-		for (const file of files) {
-			if (openFiles.has(file.path)) continue;
-			if (activeFile && file.path === activeFile.path) continue;
+			for (const file of files) {
+				if (openFiles.has(file.path)) continue;
+				if (activeFile && file.path === activeFile.path) continue;
 
-			const content = await this.app.vault.read(file);
-			if (content.length > 100000) continue;
+				const content = await this.app.vault.read(file);
+				if (content.length > 100000) continue;
 
-			const replaced = this.replaceKeywordsInText(content, "", "", file.basename);
-			if (replaced === content) continue;
+				const replaced = this.replaceKeywordsInText(content, "", "", file.basename);
+				if (replaced === content) continue;
 
-			await this.app.vault.modify(file, replaced);
-			totalLinked++;
-		}
+				await this.app.vault.modify(file, replaced);
+				totalLinked++;
+			}
 
-		if (showNotice) {
-			new Notice(
-				totalLinked > 0
-					? `Linkosaurus: Auto-linked keywords in ${totalLinked} note${totalLinked === 1 ? "" : "s"}.`
-					: "Linkosaurus: No keywords found to link."
-			);
+			if (showNotice) {
+				new Notice(
+					totalLinked > 0
+						? `Linkosaurus: Auto-linked keywords in ${totalLinked} note${totalLinked === 1 ? "" : "s"}.`
+						: "Linkosaurus: No keywords found to link."
+				);
+			}
+		} finally {
+			this.relinking = false;
 		}
 	}
 
