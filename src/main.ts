@@ -239,6 +239,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	): boolean {
 		if (!text) return false;
 
+		if (text === ". ") {
+			if (this.pendingUndo) this.clearPendingUndo();
+			return this.tryAutolinkBeforeCursor(view, from, ". ", false, to);
+		}
+
 		if (text.length > 1) {
 			return this.handleBulkInput(view, from, to, text);
 		}
@@ -274,20 +279,21 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const sel = view.state.selection.main;
 		if (!sel.empty) return false;
 
-		this.tryAutolinkBeforeCursor(view, sel.head, "", false);
-		return false;
+		return this.tryAutolinkBeforeCursor(view, sel.head, "\n", false);
 	}
 
 	private tryAutolinkBeforeCursor(
 		view: EditorView,
 		pos: number,
 		trailing: string,
-		setupPendingUndo: boolean
+		setupPendingUndo: boolean,
+		replaceTo?: number
 	): boolean {
 		const state = view.state;
 		const line = state.doc.lineAt(pos);
 		const colOffset = pos - line.from;
 		const textBefore = line.text.substring(0, colOffset);
+		const replaceEnd = replaceTo ?? pos;
 
 		if (!textBefore.length) return false;
 		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
@@ -303,7 +309,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const d = sanitize(alias.displayText);
 			const insert = `[[${t}|${d}]]${trailing}`;
 			view.dispatch({
-				changes: { from: absStart, to: pos, insert },
+				changes: { from: absStart, to: replaceEnd, insert },
 				selection: { anchor: absStart + insert.length },
 			});
 			return true;
@@ -322,7 +328,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					? `[[${kw}]]${trailing}`
 					: `[[${tg}|${kw}]]${trailing}`;
 			view.dispatch({
-				changes: { from: absStart, to: pos, insert },
+				changes: { from: absStart, to: replaceEnd, insert },
 				selection: { anchor: absStart + insert.length },
 			});
 
