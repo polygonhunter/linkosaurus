@@ -438,6 +438,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return true;
 	}
 
+	private static REPLACE_TIMEOUT_MS = 3_000;
+
 	private replaceKeywordsInText(
 		text: string,
 		charBefore: string,
@@ -451,6 +453,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			? this.normalize(skipKeyword)
 			: undefined;
 		let i = 0;
+		const deadline = Date.now() + AutoLinkKeywordsPlugin.REPLACE_TIMEOUT_MS;
 
 		if (text.startsWith("---\n") || text.startsWith("---\r\n")) {
 			const searchFrom = text.indexOf("\n") + 1;
@@ -464,6 +467,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		while (i < text.length) {
+			if ((i & 0x3ff) === 0 && Date.now() > deadline) {
+				result.push(text.substring(i));
+				return result.join("");
+			}
+
 			const sub3 = text.substring(i, i + 3);
 
 			if (sub3 === "```" || sub3 === "~~~") {
@@ -693,6 +701,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}, 5000);
 	}
 
+	private static RELINK_TIMEOUT_MS = 10_000;
+
 	private async relinkVault(showNotice: boolean) {
 		if (this.relinking) return;
 		if (this.entries.length === 0) return;
@@ -708,8 +718,19 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 			const files = this.app.vault.getMarkdownFiles();
 			let totalLinked = 0;
+			const deadline = Date.now() + AutoLinkKeywordsPlugin.RELINK_TIMEOUT_MS;
 
 			for (const file of files) {
+				if (Date.now() > deadline) {
+					if (showNotice) {
+						new Notice(
+							`Linkosaurus: Timed out after linking ${totalLinked} note${totalLinked === 1 ? "" : "s"}. ` +
+							"Remaining notes will be processed next cycle."
+						);
+					}
+					return;
+				}
+
 				if (openFiles.has(file.path)) continue;
 				if (activeFile && file.path === activeFile.path) continue;
 
@@ -744,14 +765,19 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}, 2000);
 	}
 
+	private static SCAN_TIMEOUT_MS = 5_000;
+
 	private scanVaultLinks() {
 		const seen = new Set<string>();
 		this.vaultEntries = [];
 
 		const folderPaths = this.parseFolderFilter();
 		const filterMode = this.settings.folderFilterMode;
+		const deadline = Date.now() + AutoLinkKeywordsPlugin.SCAN_TIMEOUT_MS;
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (Date.now() > deadline) break;
+
 			if (folderPaths.length > 0) {
 				const inFolder = folderPaths.some((fp) =>
 					file.path.startsWith(fp)
