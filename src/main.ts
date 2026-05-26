@@ -1,5 +1,6 @@
 import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
+import { Prec } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
 interface AutoLinkSettings {
@@ -86,21 +87,17 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					this.clearPendingUndo();
 				}
 			}),
+			Prec.high(
+				keymap.of([
+					{
+						key: "Enter",
+						run: (view) => this.handleEnterKey(view),
+					},
+				])
+			),
 			EditorView.domEventHandlers({
 				paste: (event: ClipboardEvent, view: EditorView) => {
 					return this.handlePaste(event, view);
-				},
-				keydown: (event: KeyboardEvent, view: EditorView): boolean => {
-					if (
-						event.key === "Enter" &&
-						!event.isComposing &&
-						!event.ctrlKey &&
-						!event.metaKey &&
-						!event.altKey
-					) {
-						return this.handleEnterKey(view);
-					}
-					return false;
 				},
 			}),
 		]);
@@ -241,6 +238,39 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (text === ". ") {
 			if (this.pendingUndo) this.clearPendingUndo();
+
+			const line = view.state.doc.lineAt(from);
+			const colOffset = from - line.from;
+			const textBefore = line.text.substring(0, colOffset);
+			if (this.isInsideWikilink(textBefore)) {
+				const sel = view.state.selection.main;
+				const head = sel.head;
+				const before =
+					head > 0
+						? view.state.doc.sliceString(head - 1, head)
+						: "";
+				if (before === " ") {
+					view.dispatch({
+						changes: {
+							from: head - 1,
+							to: head,
+							insert: ". ",
+						},
+						selection: { anchor: head + 1 },
+					});
+				} else {
+					view.dispatch({
+						changes: {
+							from: head,
+							to: head,
+							insert: ". ",
+						},
+						selection: { anchor: head + 2 },
+					});
+				}
+				return true;
+			}
+
 			return this.tryAutolinkBeforeCursor(view, from, ". ", false, to);
 		}
 
