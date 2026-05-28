@@ -1,6 +1,7 @@
 import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { Prec } from "@codemirror/state";
 
 interface AutoLinkSettings {
 	keywordList: string;
@@ -86,23 +87,25 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					this.clearPendingUndo();
 				}
 			}),
-			EditorView.domEventHandlers({
-				paste: (event: ClipboardEvent, view: EditorView) => {
-					return this.handlePaste(event, view);
-				},
-				keydown: (event: KeyboardEvent, view: EditorView): boolean => {
-					if (
-						event.key === "Enter" &&
-						!event.isComposing &&
-						!event.ctrlKey &&
-						!event.metaKey &&
-						!event.altKey
-					) {
-						return this.handleEnterKey(view);
-					}
-					return false;
-				},
-			}),
+			Prec.highest(
+				EditorView.domEventHandlers({
+					paste: (event: ClipboardEvent, view: EditorView) => {
+						return this.handlePaste(event, view);
+					},
+					keydown: (event: KeyboardEvent, view: EditorView): boolean => {
+						if (
+							event.key === "Enter" &&
+							!event.isComposing &&
+							!event.ctrlKey &&
+							!event.metaKey &&
+							!event.altKey
+						) {
+							return this.handleEnterKey(view);
+						}
+						return false;
+					},
+				})
+			),
 		]);
 
 		this.addCommand({
@@ -261,6 +264,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (text === " ") {
 			return this.tryAutolinkBeforeCursor(view, from, " ", true);
+		}
+
+		if (text === "\n") {
+			return this.tryAutolinkBeforeCursor(view, from, "\n", false);
 		}
 
 		if (AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(text)) {
