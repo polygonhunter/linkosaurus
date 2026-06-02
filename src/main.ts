@@ -70,13 +70,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.parseManualKeywords();
 
 		this.registerEditorExtension([
-			EditorView.inputHandler.of(
-				(
-					view: EditorView,
-					from: number,
-					to: number,
-					text: string
-				) => this.handleInput(view, from, to, text)
+			Prec.highest(
+				EditorView.inputHandler.of(
+					(
+						view: EditorView,
+						from: number,
+						to: number,
+						text: string
+					) => this.handleInput(view, from, to, text)
+				)
 			),
 			EditorView.updateListener.of((update) => {
 				if (
