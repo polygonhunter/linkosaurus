@@ -252,6 +252,28 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (text === ". ") {
 			if (this.pendingUndo) this.clearPendingUndo();
+
+			const replacedText = view.state.doc.sliceString(from, to);
+			if (replacedText && !/^\s*$/.test(replacedText)) {
+				const sel = view.state.selection.main;
+				if (!sel.empty) return true;
+				const cursor = sel.head;
+				const before =
+					cursor > 0
+						? view.state.doc.sliceString(cursor - 1, cursor)
+						: "";
+				const dispatchFrom = before === " " ? cursor - 1 : cursor;
+				view.dispatch({
+					changes: {
+						from: dispatchFrom,
+						to: cursor,
+						insert: ". ",
+					},
+					selection: { anchor: dispatchFrom + 2 },
+				});
+				return true;
+			}
+
 			return this.tryAutolinkBeforeCursor(view, from, ". ", false, to);
 		}
 
