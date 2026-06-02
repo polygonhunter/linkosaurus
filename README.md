@@ -74,6 +74,23 @@ The command **"Auto-link keywords in current note"** scans your current note and
 
 Pasted or dictated text is automatically checked for keywords and linked — no manual post-processing needed.
 
+### Auto-link website URLs
+
+URLs are converted to Markdown links while you type or paste. Works for full URLs and bare domains.
+
+| You type | Result |
+|----------|--------|
+| `https://www.ocean24.shop` | `[ocean24.shop](https://www.ocean24.shop)` |
+| `youtube.de` | `[youtube.de](https://youtube.de)` |
+| `http://example.com/foo` | `[example.com/foo](http://example.com/foo)` |
+| `https://shop.example.com/p?id=1` | `[shop.example.com/p](https://shop.example.com/p?id=1)` |
+
+The display text strips protocol, `www.`, query string, fragment, and trailing slash. The target keeps the original URL (with `https://` prepended if missing).
+
+Bare domains are detected only if the top-level domain is in the allowlist. Defaults: `de com org net io shop app dev` — editable in settings.
+
+Can be toggled off in settings if you prefer plain URLs.
+
 ### Blocklist
 
 Don't want certain terms like "Home", "TODO", or "Daily" to be auto-linked? Just add them to the blocklist (one per line). Only affects auto-detected keywords, not manually defined ones.
@@ -143,6 +160,8 @@ NAS = UGREEN NAS
 | **Folder filter** | List of folders to filter |
 | **Enable periodic auto-relink** | Periodically scan all notes and retroactively link keywords (off by default) |
 | **Relink interval (minutes)** | How often to scan the vault (1–60 minutes, default: 5) |
+| **Auto-link website URLs** | Convert `http(s)://...` and bare domains to Markdown links while typing/pasting (on by default) |
+| **URL top-level domains** | TLDs detected for bare domains (one per line, default: de com org net io shop app dev) |
 
 ---
 

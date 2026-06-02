@@ -16,6 +16,8 @@ interface AutoLinkSettings {
 	periodicRelinkIntervalMinutes: number;
 	singleWordDelimiter: string;
 	multiWordDelimiter: string;
+	urlAutolinkEnabled: boolean;
+	urlAutolinkTlds: string;
 }
 
 const DEFAULT_SETTINGS: AutoLinkSettings = {
@@ -31,6 +33,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	periodicRelinkIntervalMinutes: 5,
 	singleWordDelimiter: "//",
 	multiWordDelimiter: "///",
+	urlAutolinkEnabled: true,
+	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
 
 interface KeywordEntry {
@@ -57,6 +61,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private manualLookup = new Map<string, string>();
 	private vaultEntries: KeywordEntry[] = [];
 	private blocklistSet = new Set<string>();
+	private tldSet = new Set<string>();
 	private scanTimer: number | null = null;
 	private saveTimer: number | null = null;
 	private pendingUndo: PendingUndo | null = null;
@@ -68,6 +73,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		await this.loadSettings();
 		this.parseBlocklist();
 		this.parseManualKeywords();
+		this.parseTlds();
 
 		this.registerEditorExtension([
 			Prec.highest(
@@ -308,6 +314,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
 		if (this.isInsideWikilink(textBefore)) return false;
 
+		const urlMatch = this.matchUrlAtEnd(textBefore);
+		if (urlMatch) {
+			const absStart = line.from + urlMatch.start;
+			const insert =
+				this.formatUrlAsMarkdownLink(urlMatch.url) + trailing;
+			view.dispatch({
+				changes: { from: absStart, to: replaceEnd, insert },
+				selection: { anchor: absStart + insert.length },
+			});
+			return true;
+		}
+
 		const alias = this.matchAlias(textBefore);
 		if (alias) {
 			const file = this.app.workspace.getActiveFile();
@@ -536,6 +554,16 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				urlPrefix.startsWith("http://") ||
 				urlPrefix.startsWith("https://")
 			) {
+				const urlMatch = this.matchUrlInText(text, i, "");
+				if (urlMatch) {
+					result.push(
+						this.settings.urlAutolinkEnabled
+							? this.formatUrlAsMarkdownLink(urlMatch.url)
+							: urlMatch.url
+					);
+					i = urlMatch.end;
+					continue;
+				}
 				let end = i;
 				while (
 					end < text.length &&
@@ -582,6 +610,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}
 			const atStartBoundary =
 				!prevChar || !/[\p{L}\p{N}]/u.test(prevChar);
+
+			if (atStartBoundary) {
+				const bareUrl = this.matchUrlInText(text, i, prevChar);
+				if (bareUrl) {
+					result.push(this.formatUrlAsMarkdownLink(bareUrl.url));
+					i = bareUrl.end;
+					continue;
+				}
+			}
 
 			if (atStartBoundary) {
 				let matched = false;
@@ -870,6 +907,147 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				this.blocklistSet.add(this.normalize(line));
 			}
 		}
+	}
+
+	parseTlds() {
+		this.tldSet.clear();
+		for (const raw of this.settings.urlAutolinkTlds.split("\n")) {
+			const tld = raw.trim().toLowerCase().replace(/^\./, "");
+			if (tld && /^[a-z0-9-]+$/.test(tld)) {
+				this.tldSet.add(tld);
+			}
+		}
+	}
+
+	private static URL_CHAR_RE = /[A-Za-z0-9.\-/:?#=&%+_~]/;
+	private static BARE_DOMAIN_RE =
+		/^([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)(\/[^\s]*)?$/i;
+
+	private formatUrlAsMarkdownLink(url: string): string {
+		let target = url;
+		if (!/^https?:\/\//i.test(target)) {
+			target = "https://" + target;
+		}
+
+		let display = url
+			.replace(/^https?:\/\//i, "")
+			.replace(/^www\./i, "");
+
+		const qIdx = display.indexOf("?");
+		if (qIdx >= 0) display = display.substring(0, qIdx);
+		const hIdx = display.indexOf("#");
+		if (hIdx >= 0) display = display.substring(0, hIdx);
+		display = display.replace(/\/+$/, "");
+
+		display = display.replace(/[\]\\]/g, "");
+		target = target.replace(/[)\s]/g, (c) => encodeURIComponent(c));
+
+		return `[${display}](${target})`;
+	}
+
+	private matchUrlAtEnd(
+		textBefore: string
+	): { start: number; url: string } | null {
+		if (!this.settings.urlAutolinkEnabled) return null;
+		if (!textBefore.length) return null;
+
+		let start = textBefore.length;
+		while (start > 0) {
+			const ch = textBefore.charAt(start - 1);
+			if (!AutoLinkKeywordsPlugin.URL_CHAR_RE.test(ch)) break;
+			start--;
+		}
+		if (start === textBefore.length) return null;
+
+		if (start > 0) {
+			const boundary = textBefore.charAt(start - 1);
+			if (boundary === "(" || boundary === "[") return null;
+		}
+
+		const candidate = textBefore.substring(start);
+
+		if (/^https?:\/\//i.test(candidate)) {
+			const m = candidate.match(/^https?:\/\/([^\/?#]+)/i);
+			const host = m && m[1];
+			if (!host) return null;
+			const lastDot = host.lastIndexOf(".");
+			if (lastDot <= 0) return null;
+			const tld = host.substring(lastDot + 1).toLowerCase();
+			if (!/^[a-z0-9-]+$/.test(tld)) return null;
+			return { start, url: candidate };
+		}
+
+		const m = candidate.match(AutoLinkKeywordsPlugin.BARE_DOMAIN_RE);
+		const domainPart = m && m[1];
+		if (!domainPart) return null;
+		const lastDot = domainPart.lastIndexOf(".");
+		const tld = domainPart.substring(lastDot + 1).toLowerCase();
+		if (!this.tldSet.has(tld)) return null;
+
+		return { start, url: candidate };
+	}
+
+	private matchUrlInText(
+		text: string,
+		i: number,
+		prevChar: string
+	): { url: string; end: number } | null {
+		if (!this.settings.urlAutolinkEnabled) return null;
+
+		const isProtocol =
+			text.substring(i, i + 7).toLowerCase() === "http://" ||
+			text.substring(i, i + 8).toLowerCase() === "https://";
+
+		if (isProtocol) {
+			let end = i;
+			while (
+				end < text.length &&
+				!/\s/.test(text.charAt(end)) &&
+				text.charAt(end) !== ")" &&
+				text.charAt(end) !== "]"
+			)
+				end++;
+			let url = text.substring(i, end);
+			while (url.length > 0 && /[.,;:!?]/.test(url.charAt(url.length - 1))) {
+				url = url.substring(0, url.length - 1);
+				end--;
+			}
+			const m = url.match(/^https?:\/\/([^\/?#]+)/i);
+			const host = m && m[1];
+			if (!host) return null;
+			const lastDot = host.lastIndexOf(".");
+			if (lastDot <= 0) return null;
+			const tld = host.substring(lastDot + 1).toLowerCase();
+			if (!/^[a-z0-9-]+$/.test(tld)) return null;
+			return { url, end };
+		}
+
+		if (prevChar && /[\p{L}\p{N}]/u.test(prevChar)) return null;
+
+		const firstCh = text.charAt(i);
+		if (!/[a-zA-Z0-9]/.test(firstCh)) return null;
+
+		let end = i;
+		while (
+			end < text.length &&
+			AutoLinkKeywordsPlugin.URL_CHAR_RE.test(text.charAt(end))
+		)
+			end++;
+		let url = text.substring(i, end);
+		while (url.length > 0 && /[.,;:!?]/.test(url.charAt(url.length - 1))) {
+			url = url.substring(0, url.length - 1);
+			end--;
+		}
+		if (!url) return null;
+
+		const m = url.match(AutoLinkKeywordsPlugin.BARE_DOMAIN_RE);
+		const domainPart = m && m[1];
+		if (!domainPart) return null;
+		const lastDot = domainPart.lastIndexOf(".");
+		const tld = domainPart.substring(lastDot + 1).toLowerCase();
+		if (!this.tldSet.has(tld)) return null;
+
+		return { url, end };
 	}
 
 	private parseFolderFilter(): string[] {
@@ -1198,12 +1376,17 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.singleWordDelimiter = DEFAULT_SETTINGS.singleWordDelimiter;
 		if (typeof this.settings.multiWordDelimiter !== "string" || !this.settings.multiWordDelimiter)
 			this.settings.multiWordDelimiter = DEFAULT_SETTINGS.multiWordDelimiter;
+		if (typeof this.settings.urlAutolinkEnabled !== "boolean")
+			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
+		if (typeof this.settings.urlAutolinkTlds !== "string")
+			this.settings.urlAutolinkTlds = DEFAULT_SETTINGS.urlAutolinkTlds;
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.parseBlocklist();
 		this.parseManualKeywords();
+		this.parseTlds();
 		if (this.settings.scanVaultLinks) {
 			this.scheduleScan();
 		}
@@ -1480,6 +1663,43 @@ class AutoLinkSettingTab extends PluginSettingTab {
 								this.plugin.startPeriodicRelink();
 							}
 						});
+					});
+			}
+
+			new Setting(containerEl)
+				.setName("Auto-link website URLs")
+				.setDesc(
+					"Convert URLs to Markdown links while typing or pasting. " +
+					"Detects http(s)://... and bare domains (e.g. youtube.de)."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.urlAutolinkEnabled)
+						.onChange(async (value) => {
+							this.plugin.settings.urlAutolinkEnabled = value;
+							await this.plugin.saveSettings();
+							this.display();
+						});
+				});
+
+			if (this.plugin.settings.urlAutolinkEnabled) {
+				new Setting(containerEl)
+					.setName("URL top-level domains")
+					.setDesc(
+						"TLDs to detect for bare domains (one per line, without leading dot). " +
+						"Only affects bare domains — http(s):// URLs always link."
+					)
+					.addTextArea((text) => {
+						text.inputEl.style.fontFamily = "monospace";
+						text.inputEl.style.width = "100%";
+						text.inputEl.rows = 6;
+						text.setPlaceholder("de\ncom\norg")
+							.setValue(this.plugin.settings.urlAutolinkTlds)
+							.onChange((value) => {
+								this.plugin.settings.urlAutolinkTlds = value;
+								this.plugin.parseTlds();
+								this.plugin.debouncedSave();
+							});
 					});
 			}
 
