@@ -1,7 +1,7 @@
 {
 	"id": "autolink-keywords",
 	"name": "Linkosaurus",
-	"version": "3.4.3",
+	"version": "3.4.4",
 	"minAppVersion": "0.15.0",
 	"description": "Automatically links keywords to notes and turns URLs into Markdown links as you type, paste, or dictate.",
 	"author": "polygonhunter",

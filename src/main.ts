@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { Prec } from "@codemirror/state";
@@ -50,7 +50,7 @@ interface PendingUndo {
 }
 
 function sanitize(text: string): string {
-	return text.replace(/\]\]|\[\[|[|#^\\\/\n\r\0]/g, "");
+	return text.replace(/\]\]|\[\[|[|#^\\/\n\r\0]/g, "");
 }
 
 export default class AutoLinkKeywordsPlugin extends Plugin {
@@ -151,7 +151,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					const list = this.settings.keywordList.trimEnd();
 					const sep = list ? "\n" : "";
 					this.settings.keywordList = list + sep + text;
-					this.saveSettings();
+					void this.saveSettings();
 				}
 			},
 		});
@@ -194,7 +194,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			id: "relink-all-notes",
 			name: "Auto-link keywords in all notes",
 			callback: () => {
-				this.relinkVault(true);
+				void this.relinkVault(true);
 			},
 		});
 
@@ -741,7 +741,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (!this.settings.periodicRelink) return;
 		const ms = this.settings.periodicRelinkIntervalMinutes * 60 * 1000;
 		this.relinkTimer = window.setInterval(() => {
-			this.relinkVault(false);
+			void this.relinkVault(false);
 		}, ms);
 	}
 
@@ -757,7 +757,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.relinkDebounceTimer !== null) window.clearTimeout(this.relinkDebounceTimer);
 		this.relinkDebounceTimer = window.setTimeout(() => {
 			this.relinkDebounceTimer = null;
-			this.relinkVault(false);
+			void this.relinkVault(false);
 		}, 5000);
 	}
 
@@ -842,9 +842,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const cache = this.app.metadataCache.getFileCache(file);
 
 			if (this.settings.scanFrontmatterAliases && cache?.frontmatter) {
-				const raw =
-					cache.frontmatter.aliases ?? cache.frontmatter.alias;
-				const aliasList = Array.isArray(raw)
+				const fm = cache.frontmatter as Record<string, unknown>;
+				const raw: unknown = fm.aliases ?? fm.alias;
+				const aliasList: unknown[] = Array.isArray(raw)
 					? raw
 					: typeof raw === "string"
 						? [raw]
@@ -989,7 +989,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const candidate = textBefore.substring(start);
 
 		if (/^https?:\/\//i.test(candidate)) {
-			const m = candidate.match(/^https?:\/\/([^\/?#]+)/i);
+			const m = candidate.match(/^https?:\/\/([^/?#]+)/i);
 			const host = m && m[1];
 			if (!host) return null;
 			const lastDot = host.lastIndexOf(".");
@@ -1034,7 +1034,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				url = url.substring(0, url.length - 1);
 				end--;
 			}
-			const m = url.match(/^https?:\/\/([^\/?#]+)/i);
+			const m = url.match(/^https?:\/\/([^/?#]+)/i);
 			const host = m && m[1];
 			if (!host) return null;
 			const lastDot = host.lastIndexOf(".");
@@ -1372,17 +1372,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	debouncedSave() {
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.saveTimer = window.setTimeout(() => {
-			this.saveSettings();
+			void this.saveSettings();
 			this.saveTimer = null;
 		}, 500);
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		const loaded = (await this.loadData()) as Partial<AutoLinkSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
 		if (typeof this.settings.keywordList !== "string")
 			this.settings.keywordList = "";
 		if (typeof this.settings.blocklist !== "string")
@@ -1427,24 +1424,53 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Linkosaurus" });
+		new Setting(containerEl).setName("Linkosaurus").setHeading();
 
-		const desc = containerEl.createEl("div");
-		desc.style.marginBottom = "1em";
-		desc.innerHTML =
-			"One keyword per line. Lines starting with <code>#</code> are comments.<br>" +
-			"<code>Dortmund</code> → <code>[[Dortmund]]</code><br>" +
-			"<code>NAS = UGREEN NAS</code> → <code>[[UGREEN NAS|NAS]]</code><br><br>" +
-			"<b>Single-word alias:</b> <code>York//keyword</code> + Space → <code>[[target|York]]</code><br>" +
-			"<b>Multi-word alias:</b> <code>///New York///keyword</code> + Space → <code>[[target|New York]]</code><br>" +
-			"Delimiters are configurable below.<br><br>" +
-			"<b>Shortcut:</b> select a word and use the <em>Link selection and add to keyword list</em> command " +
-			"(assign a hotkey in Settings → Hotkeys).";
+		const desc = containerEl.createDiv({ cls: "linkosaurus-desc" });
+		desc.createSpan({
+			text: "One keyword per line. Lines starting with ",
+		});
+		desc.createEl("code", { text: "#" });
+		desc.createSpan({ text: " are comments." });
+		desc.createEl("br");
+		desc.createEl("code", { text: "London" });
+		desc.createSpan({ text: " → " });
+		desc.createEl("code", { text: "[[London]]" });
+		desc.createEl("br");
+		desc.createEl("code", { text: "ML = Machine Learning" });
+		desc.createSpan({ text: " → " });
+		desc.createEl("code", { text: "[[Machine Learning|ML]]" });
+		desc.createEl("br");
+		desc.createEl("br");
+		desc.createEl("b", { text: "Single-word alias: " });
+		desc.createEl("code", { text: "trip//keyword" });
+		desc.createSpan({ text: " + Space → " });
+		desc.createEl("code", { text: "[[target|trip]]" });
+		desc.createEl("br");
+		desc.createEl("b", { text: "Multi-word alias: " });
+		desc.createEl("code", { text: "///cherry blossoms///keyword" });
+		desc.createSpan({ text: " + Space → " });
+		desc.createEl("code", { text: "[[target|cherry blossoms]]" });
+		desc.createEl("br");
+		desc.createSpan({ text: "Delimiters are configurable below." });
+		desc.createEl("br");
+		desc.createEl("br");
+		desc.createEl("b", { text: "Shortcut: " });
+		desc.createSpan({
+			text: "select a word and use the ",
+		});
+		desc.createEl("em", {
+			text: "Link selection and add to keyword list",
+		});
+		desc.createSpan({
+			text: " command (assign a hotkey in Settings → Hotkeys).",
+		});
 
-		new Setting(containerEl).setName("Keyword list").addTextArea((text) => {
-			text.inputEl.style.fontFamily = "monospace";
-			text.inputEl.style.width = "100%";
-			text.inputEl.rows = 28;
+		new Setting(containerEl)
+			.setName("Keyword list")
+			.setClass("linkosaurus-textarea-mono")
+			.addTextArea((text) => {
+				text.inputEl.rows = 28;
 			text.setValue(this.plugin.settings.keywordList).onChange(
 				(value) => {
 					this.plugin.settings.keywordList = value;
@@ -1472,24 +1498,25 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			.setName("Single-word alias delimiter")
 			.setDesc(
 				"Delimiter between display text and keyword for single-word aliases. " +
-				"Example: York//Urlaub → [[Urlaub|York]]"
+				"Example: trip//Tokyo → [[Tokyo|trip]]"
 			)
+			.setClass("linkosaurus-input-delim")
 			.addText((text) => {
-				text.inputEl.style.width = "80px";
-				text.inputEl.style.fontFamily = "monospace";
+				const setError = (on: boolean) =>
+					text.inputEl.toggleClass("linkosaurus-input-error", on);
 				text.setPlaceholder("//")
 					.setValue(this.plugin.settings.singleWordDelimiter)
 					.onChange(async (value) => {
 						if (!value) {
-							text.inputEl.style.borderColor = "var(--text-error)";
+							setError(true);
 							return;
 						}
 						if (value === this.plugin.settings.multiWordDelimiter) {
-							text.inputEl.style.borderColor = "var(--text-error)";
+							setError(true);
 							new Notice("Single-word and multi-word delimiters must be different.");
 							return;
 						}
-						text.inputEl.style.borderColor = "";
+						setError(false);
 						this.plugin.settings.singleWordDelimiter = value;
 						await this.plugin.saveSettings();
 						if (
@@ -1505,24 +1532,25 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			.setName("Multi-word alias delimiter")
 			.setDesc(
 				"Delimiter that wraps display text for multi-word aliases. " +
-				"Example: ///New York///Urlaub → [[Urlaub|New York]]"
+				"Example: ///cherry blossoms///Tokyo → [[Tokyo|cherry blossoms]]"
 			)
+			.setClass("linkosaurus-input-delim")
 			.addText((text) => {
-				text.inputEl.style.width = "80px";
-				text.inputEl.style.fontFamily = "monospace";
+				const setError = (on: boolean) =>
+					text.inputEl.toggleClass("linkosaurus-input-error", on);
 				text.setPlaceholder("///")
 					.setValue(this.plugin.settings.multiWordDelimiter)
 					.onChange(async (value) => {
 						if (!value) {
-							text.inputEl.style.borderColor = "var(--text-error)";
+							setError(true);
 							return;
 						}
 						if (value === this.plugin.settings.singleWordDelimiter) {
-							text.inputEl.style.borderColor = "var(--text-error)";
+							setError(true);
 							new Notice("Single-word and multi-word delimiters must be different.");
 							return;
 						}
-						text.inputEl.style.borderColor = "";
+						setError(false);
 						this.plugin.settings.multiWordDelimiter = value;
 						await this.plugin.saveSettings();
 						if (
@@ -1572,9 +1600,9 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				.setDesc(
 					"Ignore auto-detected keywords shorter than this (0 = no limit). Does not affect manual keywords."
 				)
+				.setClass("linkosaurus-input-number")
 				.addText((text) => {
 					text.inputEl.type = "number";
-					text.inputEl.style.width = "60px";
 					text.inputEl.min = "0";
 					text.inputEl.max = "50";
 					text.setValue(
@@ -1593,11 +1621,10 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				.setDesc(
 					"Keywords to exclude from auto-linking (one per line). Does not affect manual keywords."
 				)
+				.setClass("linkosaurus-textarea-mono")
 				.addTextArea((text) => {
-					text.inputEl.style.fontFamily = "monospace";
-					text.inputEl.style.width = "100%";
 					text.inputEl.rows = 6;
-					text.setPlaceholder("Home\nTODO\nDaily")
+					text.setPlaceholder("Home\nInbox\nDaily")
 						.setValue(this.plugin.settings.blocklist)
 						.onChange((value) => {
 							this.plugin.settings.blocklist = value;
@@ -1629,9 +1656,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				.setDesc(
 					"Folders to include or exclude from vault scanning (one per line)."
 				)
+				.setClass("linkosaurus-textarea-mono")
 				.addTextArea((text) => {
-					text.inputEl.style.fontFamily = "monospace";
-					text.inputEl.style.width = "100%";
 					text.inputEl.rows = 4;
 					text.setPlaceholder("Templates\nDaily Notes")
 						.setValue(this.plugin.settings.folderFilter)
@@ -1641,7 +1667,9 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						});
 				});
 
-			containerEl.createEl("h3", { text: "Periodic auto-relink" });
+			new Setting(containerEl)
+				.setName("Periodic auto-relink")
+				.setHeading();
 
 			new Setting(containerEl)
 				.setName("Enable periodic auto-relink")
@@ -1670,9 +1698,9 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.setDesc(
 						"How often to scan the vault for unlinkable keywords (1–60 minutes)."
 					)
+					.setClass("linkosaurus-input-number")
 					.addText((text) => {
 						text.inputEl.type = "number";
-						text.inputEl.style.width = "60px";
 						text.inputEl.min = "1";
 						text.inputEl.max = "60";
 						text.setValue(
@@ -1711,9 +1739,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						"TLDs to detect for bare domains (one per line, without leading dot). " +
 						"Only affects bare domains — http(s):// URLs always link."
 					)
+					.setClass("linkosaurus-textarea-mono")
 					.addTextArea((text) => {
-						text.inputEl.style.fontFamily = "monospace";
-						text.inputEl.style.width = "100%";
 						text.inputEl.rows = 6;
 						text.setPlaceholder("de\ncom\norg")
 							.setValue(this.plugin.settings.urlAutolinkTlds)
@@ -1726,26 +1753,18 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			}
 
 			const vault = this.plugin.getVaultKeywords();
-			const details = containerEl.createEl("details");
-			details.style.marginTop = "0.5em";
-			const summary = details.createEl("summary");
-			summary.style.cursor = "pointer";
-			summary.style.color = "var(--text-muted)";
-			summary.setText(
-				`Auto-detected keywords (${vault.length})`
-			);
+			const details = containerEl.createEl("details", {
+				cls: "linkosaurus-details",
+			});
+			details.createEl("summary", {
+				cls: "linkosaurus-details-summary",
+				text: `Auto-detected keywords (${vault.length})`,
+			});
 			if (vault.length > 0) {
-				const list = details.createEl("div");
-				list.style.fontFamily = "monospace";
-				list.style.fontSize = "0.85em";
-				list.style.marginTop = "0.5em";
-				list.style.maxHeight = "300px";
-				list.style.overflowY = "auto";
-				list.style.padding = "0.5em";
-				list.style.background = "var(--background-secondary)";
-				list.style.borderRadius = "4px";
-				list.setText(vault.join("\n"));
-				list.style.whiteSpace = "pre-wrap";
+				details.createDiv({
+					cls: "linkosaurus-details-list",
+					text: vault.join("\n"),
+				});
 			}
 		}
 	}

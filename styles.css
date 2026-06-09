@@ -1,0 +1,42 @@
+.linkosaurus-desc {
+	margin-bottom: 1em;
+}
+
+.linkosaurus-textarea-mono textarea {
+	font-family: var(--font-monospace);
+	width: 100%;
+}
+
+.linkosaurus-input-delim input {
+	width: 80px;
+	font-family: var(--font-monospace);
+}
+
+.linkosaurus-input-error input {
+	border-color: var(--text-error);
+}
+
+.linkosaurus-input-number input {
+	width: 60px;
+}
+
+.linkosaurus-details {
+	margin-top: 0.5em;
+}
+
+.linkosaurus-details-summary {
+	cursor: pointer;
+	color: var(--text-muted);
+}
+
+.linkosaurus-details-list {
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	margin-top: 0.5em;
+	max-height: 300px;
+	overflow-y: auto;
+	padding: 0.5em;
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+	white-space: pre-wrap;
+}
