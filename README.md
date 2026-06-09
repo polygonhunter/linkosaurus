@@ -2,142 +2,149 @@
 
 **Your vault links itself.**
 
-Linkosaurus turns Obsidian into a smart note-taking system that automatically detects connections between your thoughts — while you type, dictate, or paste. No more manual `[[`. No interrupting your writing flow. Just type a keyword, press Space (or Enter, or a punctuation mark), and the link appears.
+Linkosaurus turns plain text into wikilinks as you type. Write a keyword, press Space — and the link is there. No more reaching for `[[`. No interruption to your writing flow.
 
-Works on desktop and mobile (iOS/Android).
+Detects notes from your vault, custom keyword lists, frontmatter aliases, and website URLs. Works on desktop and mobile. Runs entirely offline.
+
+---
+
+## Highlights
+
+| You type | Result |
+|----------|--------|
+| `Tokyo ` | `[[Tokyo]] ` |
+| `ML ` | `[[Machine Learning\|ML]] ` |
+| `Berlin.` | `[[Berlin]].` |
+| `(Paris)` | `([[Paris]])` |
+| `trip//Tokyo ` | `[[Tokyo\|trip]] ` |
+| `///cherry blossoms///Tokyo ` | `[[Tokyo\|cherry blossoms]] ` |
+| `youtube.com ` | `[youtube.com](https://youtube.com) ` |
+| `https://www.example.com/blog ` | `[example.com/blog](https://www.example.com/blog) ` |
 
 ---
 
 ## Features
 
-### Auto-link while typing
+### Auto-link while you type
 
-Type a keyword and press Space, Enter, or any common punctuation — Linkosaurus recognizes it instantly and creates the matching wikilink.
+Triggers on Space, Enter, or any common punctuation: `)` `.` `,` `!` `?` `:` `;`
 
-| You type | Result |
-|----------|--------|
-| `Dortmund ` | `[[Dortmund]] ` |
-| `NAS ` | `[[UGREEN NAS\|NAS]] ` (with alias mapping) |
-| `Dortmund.` | `[[Dortmund]].` |
-| `(Dortmund)` | `([[Dortmund]])` |
-| `Dortmund⏎` | `[[Dortmund]]` + new line |
+Linkosaurus matches the last word (or words) you typed against your keyword list and replaces them with the right wikilink.
 
-Supported triggers: Space, Enter, `)` `.` `,` `!` `?` `:` `;`
+### Multi-word keywords with smart undo
 
-### Alias syntax
+If a keyword is the prefix of a longer keyword, Linkosaurus waits to see what you type next.
 
-Create links with custom display text while writing. Perfect for natural reading flow.
+With both `Open` and `Open Source` in your list:
 
-**Single-word alias** (default delimiter `//`):
+1. `Open ` → `[[Open]]`
+2. Type `S` → Linkosaurus sees that `Open S…` could become `Open Source` and undoes the link → `Open S`
+3. Type `ource ` → `[[Open Source]]`
 
-| You type | Result |
-|----------|--------|
-| `York//Urlaub ` | `[[Urlaub\|York]] ` |
+If your next character can't continue the longer term (e.g. `Open H`), the original `[[Open]]` link stays.
 
-**Multi-word alias** (default delimiter `///`):
+### Inline aliases
 
-| You type | Result |
-|----------|--------|
-| `///New York///Urlaub ` | `[[Urlaub\|New York]] ` |
+Add custom display text without breaking your writing flow.
 
-Only works when the target keyword exists in the keyword list. Both delimiters are configurable in the settings.
+**Single-word** (default delimiter `//`):
 
-### Multi-word keywords
+```
+trip//Tokyo  →  [[Tokyo|trip]]
+```
 
-Linkosaurus recognizes compound terms like "New York" automatically — even when "New" alone is also a keyword:
+**Multi-word** (default delimiter `///`):
 
-1. `New` + Space → `[[New]]` (linked immediately)
-2. You type `Y` → Linkosaurus detects that `New Y...` could become `New York`, undoes the link → `New Y`
-3. You type `ork` + Space → `[[New York]]`
+```
+///cherry blossoms///Tokyo  →  [[Tokyo|cherry blossoms]]
+```
 
-If you type something that doesn't continue a longer term (e.g. `H`), the `[[New]]` link stays.
+The target on the right must exist in the keyword list. Both delimiters are configurable.
 
 ### Vault scanning
 
-When enabled (default), **all note names** in your vault automatically become keywords. Creating a new note makes its name instantly auto-linkable — no manual configuration needed.
-
-Existing wikilinks in your vault are also detected, so linked notes that don't exist yet are auto-linked as well.
+When enabled (default), every note name in your vault becomes a keyword automatically. Create a new note and its name is auto-linkable immediately. Linkosaurus also picks up wikilinks to notes that don't exist yet, so you can link forward.
 
 ### Frontmatter aliases
 
-Uses the `aliases` fields from your notes' YAML frontmatter as additional keywords. If a note "Dortmund" has the alias "BVB City", typing "BVB City" will also auto-link — directly to the right note. Can be toggled in settings.
+Reads the `aliases:` field from your notes' YAML frontmatter. If a note `Tokyo.md` lists `Edo` as an alias, typing `Edo` links straight to `Tokyo`. Toggleable in settings.
 
 ### Case-insensitive matching
 
-Whether you type "dortmund", "Dortmund", or "DORTMUND" — Linkosaurus recognizes the keyword and links it. Can be toggled per preference.
-
-### Bulk auto-link existing text
-
-The command **"Auto-link keywords in current note"** scans your current note and links all recognized keywords at once. Frontmatter, code blocks, existing links, and URLs are left untouched. The note never links to itself.
+`tokyo`, `Tokyo`, and `TOKYO` all match the same keyword. Toggleable.
 
 ### Paste & dictation
 
-Pasted or dictated text is automatically checked for keywords and linked — no manual post-processing needed.
+Pasted or dictated text is scanned for keywords (and URLs, see below) and converted in one pass.
 
-### Auto-link website URLs
+### Auto-link URLs
 
-URLs are converted to Markdown links while you type or paste. Works for full URLs and bare domains.
+Plain URLs become Markdown links automatically — both fully-qualified URLs and bare domains.
 
 | You type | Result |
 |----------|--------|
-| `https://www.ocean24.shop` | `[ocean24.shop](https://www.ocean24.shop)` |
-| `youtube.de` | `[youtube.de](https://youtube.de)` |
-| `http://example.com/foo` | `[example.com/foo](http://example.com/foo)` |
+| `https://www.github.com` | `[github.com](https://www.github.com)` |
+| `github.com` | `[github.com](https://github.com)` |
+| `http://example.com/blog` | `[example.com/blog](http://example.com/blog)` |
 | `https://shop.example.com/p?id=1` | `[shop.example.com/p](https://shop.example.com/p?id=1)` |
 
-The display text strips protocol, `www.`, query string, fragment, and trailing slash. The target keeps the original URL (with `https://` prepended if missing).
+The display strips the protocol, `www.`, query string, fragment, and trailing slash. The target preserves the full URL.
 
-Bare domains are detected only if the top-level domain is in the allowlist. Defaults: `de com org net io shop app dev` — editable in settings.
+Bare domains are recognized only if their top-level domain is in the allowlist. Defaults: `de com org net io shop app dev` — editable in settings.
 
-Can be toggled off in settings if you prefer plain URLs.
-
-### Blocklist
-
-Don't want certain terms like "Home", "TODO", or "Daily" to be auto-linked? Just add them to the blocklist (one per line). Only affects auto-detected keywords, not manually defined ones.
-
-### Minimum keyword length
-
-Set a minimum length for auto-detected keywords to prevent accidental linking of short words. Manual keywords are unaffected.
-
-### Folder filter
-
-Control which folders are included or excluded from vault scanning. Ideal for keeping Templates, Daily Notes, or archive folders out of auto-linking.
+Toggleable per preference.
 
 ### Periodic auto-relink
 
-When a new note is created (e.g. `Kerstin.md`), existing notes that mention "Kerstin" as plain text still won't have a link — because the keyword didn't exist when they were written. Periodic auto-relink fixes this: it scans your entire vault at a configurable interval (1–60 minutes) and retroactively converts plain-text keywords to wikilinks.
+New keywords don't reach back in time: a note created today won't have its name auto-linked in notes written yesterday. Periodic auto-relink fixes this by re-scanning the vault on a schedule (1–60 minutes) and converting matches it finds in plain text.
 
-- **Disabled by default** — enable in settings
-- Also triggers automatically (with debounce) when a note is created or renamed
-- Notes currently open in the editor are skipped to avoid cursor jumps
-- Respects all existing rules: blocklist, self-link prevention, code blocks, frontmatter, URLs
+Disabled by default. Also triggers automatically (debounced) when a note is created or renamed. Open notes are skipped to avoid cursor jumps. Respects all existing rules: blocklist, code blocks, frontmatter, URLs, and self-link prevention.
 
-### Vault-wide auto-link command
+### Bulk commands
 
-The command **"Auto-link keywords in all notes"** scans every note in the vault and links all recognized keywords at once — a manual one-shot alternative to periodic auto-relink. Open notes are skipped.
+| Command | What it does |
+|---------|-------------|
+| **Auto-link keywords in current note** | Scans the current note and links every matching keyword in one go |
+| **Auto-link keywords in all notes** | One-shot scan over the entire vault (open notes are skipped) |
+| **Link selection and add to keyword list** | Links the selected word *and* adds it to the keyword list — assign a hotkey for fastest workflow |
 
-### Shortcut command
+### Blocklist
 
-Select a word (or place the cursor on it) and run **"Link selection and add to keyword list"** — the word is linked immediately and added to the keyword list at the same time. Assignable to a hotkey under Settings → Hotkeys.
+Block specific keywords (e.g. `Home`, `Inbox`, `Daily`) from being auto-linked. Only applies to auto-detected vault keywords; manual entries are never blocked.
+
+### Minimum keyword length
+
+Set a floor for auto-detected keyword length to prevent accidental linking of short words. Manual entries ignore this limit.
+
+### Folder filter
+
+Include or exclude folders from vault scanning. Useful for excluding `Templates/`, `Daily/`, or archive directories.
+
+### Where Linkosaurus stays out of the way
+
+- Inside existing `[[wikilinks]]`
+- Inside `[markdown](links)`
+- Inside fenced or inline code blocks
+- Inside URLs (unless URL auto-linking is enabled)
+- Inside YAML frontmatter
 
 ---
 
-## Keyword list
+## Keyword list syntax
 
-Configured in the plugin settings as plain text, one entry per line.
+Edit in the plugin settings, one entry per line.
 
 ```
 # Comments start with #
-Dortmund
-Lippstadt
+London
+Tokyo
 
 # Alias mapping: keyword = target note
-NAS = UGREEN NAS
+ML = Machine Learning
 ```
 
-**Rules:**
-- `Dortmund` — keyword and target are identical → `[[Dortmund]]`
-- `NAS = UGREEN NAS` — left is the keyword, right is the target → `[[UGREEN NAS|NAS]]`
+- `London` — keyword and target are the same → `[[London]]`
+- `ML = Machine Learning` — `ML` is the keyword to match; `Machine Learning` is the linked note → `[[Machine Learning|ML]]`
 - Lines starting with `#` are comments
 - Empty lines are ignored
 - Manual entries take priority over auto-detected vault keywords
@@ -148,57 +155,39 @@ NAS = UGREEN NAS
 
 | Setting | Description |
 |---------|-------------|
-| **Keyword list** | Text area for manually defined keywords |
-| **Case-insensitive matching** | Ignore upper/lower case when matching |
-| **Single-word alias delimiter** | Delimiter for single-word aliases (default `//`) |
-| **Multi-word alias delimiter** | Delimiter for multi-word aliases (default `///`) |
-| **Auto-detect vault links** | Automatically use all note names as keywords |
-| **Include frontmatter aliases** | Use aliases from frontmatter as keywords |
-| **Minimum keyword length** | Minimum length for auto-detected keywords (0 = no limit) |
+| **Keyword list** | Manually defined keywords |
+| **Case-insensitive matching** | Ignore case when matching |
+| **Single-word alias delimiter** | Inline alias delimiter for single-word display text (default `//`) |
+| **Multi-word alias delimiter** | Inline alias delimiter for multi-word display text (default `///`) |
+| **Auto-detect vault links** | Use every note name in the vault as a keyword |
+| **Include frontmatter aliases** | Use `aliases:` fields from frontmatter as keywords |
+| **Minimum keyword length** | Floor for auto-detected keyword length (0 = no limit) |
 | **Blocklist** | Keywords excluded from auto-linking |
 | **Folder filter mode** | Include or exclude folders |
-| **Folder filter** | List of folders to filter |
-| **Enable periodic auto-relink** | Periodically scan all notes and retroactively link keywords (off by default) |
-| **Relink interval (minutes)** | How often to scan the vault (1–60 minutes, default: 5) |
-| **Auto-link website URLs** | Convert `http(s)://...` and bare domains to Markdown links while typing/pasting (on by default) |
-| **URL top-level domains** | TLDs detected for bare domains (one per line, default: de com org net io shop app dev) |
-
----
-
-## Where it won't trigger
-
-- Inside existing `[[wikilinks]]`
-- In code blocks (fenced or inline)
-- In URLs
-- In YAML frontmatter
-- When the text already starts with `[[`
+| **Folder filter** | Folders to filter |
+| **Enable periodic auto-relink** | Periodic vault scan that retroactively links keywords (off by default) |
+| **Relink interval (minutes)** | How often to scan (1–60 minutes, default 5) |
+| **Auto-link website URLs** | Convert `http(s)://…` and bare domains to Markdown links (on by default) |
+| **URL top-level domains** | TLDs recognized for bare domains (one per line) |
 
 ---
 
 ## Privacy
 
-Linkosaurus runs **entirely locally**. No notes, no keywords, no data ever leaves your device. Only the plugin code is hosted on GitHub.
+Linkosaurus runs **entirely locally**. No notes, keywords, or URLs ever leave your device. Only the plugin code is hosted on GitHub.
 
 ---
 
 ## Installation
 
-### From Obsidian Community Plugins
+### From Community Plugins
 
 1. Open **Settings → Community plugins → Browse**
 2. Search for **Linkosaurus**
 3. Click **Install**, then **Enable**
 
-### Via BRAT
-
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
-2. In BRAT settings: **Add beta plugin**
-3. Enter: `polygonhunter/linkosaurus`
-4. Enable **Linkosaurus** in Community Plugins
-
 ### Manual
 
-1. Clone the repository
-2. `npm install && npm run build`
-3. Copy `main.js` and `manifest.json` to `.obsidian/plugins/autolink-keywords/`
-4. Enable the plugin in Obsidian settings
+1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/polygonhunter/linkosaurus/releases/latest)
+2. Place them in `<vault>/.obsidian/plugins/autolink-keywords/`
+3. Enable Linkosaurus under **Settings → Community plugins**

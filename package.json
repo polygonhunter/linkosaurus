@@ -1,7 +1,7 @@
 {
 	"name": "autolink-keywords",
-	"version": "3.4.2",
-	"description": "Automatically converts keywords into Obsidian wikilinks as you type.",
+	"version": "3.4.3",
+	"description": "Automatically links keywords to notes and turns URLs into Markdown links as you type, paste, or dictate.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
