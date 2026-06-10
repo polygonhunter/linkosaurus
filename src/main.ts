@@ -1424,8 +1424,6 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Linkosaurus").setHeading();
-
 		const desc = containerEl.createDiv({ cls: "linkosaurus-desc" });
 		desc.createSpan({
 			text: "One keyword per line. Lines starting with ",
@@ -1483,7 +1481,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Case-insensitive matching")
 			.setDesc(
-				"Match keywords regardless of upper/lower case (e.g. typing “dortmund” matches keyword “Dortmund”)."
+				"Match keywords regardless of upper/lower case."
 			)
 			.addToggle((toggle) => {
 				toggle
@@ -1720,7 +1718,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				.setName("Auto-link website URLs")
 				.setDesc(
 					"Convert URLs to Markdown links while typing or pasting. " +
-					"Detects http(s)://... and bare domains (e.g. youtube.de)."
+					"Detects http(s)://... and bare domains (e.g. example.com)."
 				)
 				.addToggle((toggle) => {
 					toggle

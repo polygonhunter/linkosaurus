@@ -1,6 +1,6 @@
 {
 	"name": "autolink-keywords",
-	"version": "3.4.4",
+	"version": "3.4.5",
 	"description": "Automatically links keywords to notes and turns URLs into Markdown links as you type, paste, or dictate.",
 	"main": "main.js",
 	"type": "module",
