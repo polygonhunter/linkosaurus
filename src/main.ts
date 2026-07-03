@@ -285,7 +285,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (this.pendingUndo) {
 			if (/^\s+$/.test(text)) return false;
-			if (AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(text)) {
+			// A keyword only grows into a longer one across word characters
+			// (e.g. "Open" → "Open Source"). Any non-word character — sentence
+			// punctuation or a separator like "-" in "Eibel - Facebook" — ends
+			// the current keyword, so keep the link that was already created
+			// instead of undoing it.
+			if (!/[\p{L}\p{N}]/u.test(text)) {
 				this.clearPendingUndo();
 				return false;
 			}
