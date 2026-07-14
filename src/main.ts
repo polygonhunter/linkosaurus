@@ -1,7 +1,7 @@
 import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
-import { Prec } from "@codemirror/state";
+import { Prec, type ChangeDesc } from "@codemirror/state";
 
 interface AutoLinkSettings {
 	keywordList: string;
@@ -49,6 +49,43 @@ interface PendingUndo {
 	timer: number;
 }
 
+// Snapshot of the text a link replaced, kept briefly so stale IME/autocorrect
+// re-commits (sent against pre-link coordinates) can be recognized and dropped.
+interface LastAutolink {
+	view: EditorView;
+	time: number;
+	from: number;
+	to: number;
+	text: string;
+}
+
+interface DeferredBase {
+	view: EditorView;
+	from: number;
+	tries: number;
+	timer: number;
+}
+
+// A single trigger character typed during composition: link the keyword
+// ending right before it once the composition has settled.
+interface DeferredTrigger extends DeferredBase {
+	kind: "trigger";
+	trigger: string;
+	setupPendingUndo: boolean;
+	// Expected document content ending at the trigger, captured when the
+	// deferral was scheduled; must still match when the deferral fires.
+	context: string;
+}
+
+// A multi-character commit (swipe/dictation/autocorrect) that arrived during
+// composition: transform the whole committed range once it has settled.
+interface DeferredBulk extends DeferredBase {
+	kind: "bulk";
+	text: string;
+}
+
+type DeferredAutolink = DeferredTrigger | DeferredBulk;
+
 function sanitize(text: string): string {
 	return text.replace(/\]\]|\[\[|[|#^\\/\n\r\0]/g, "");
 }
@@ -65,6 +102,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private scanTimer: number | null = null;
 	private saveTimer: number | null = null;
 	private pendingUndo: PendingUndo | null = null;
+	private lastAutolink: LastAutolink | null = null;
+	private deferredAutolinks: DeferredAutolink[] = [];
 	private relinkTimer: number | null = null;
 	private relinkDebounceTimer: number | null = null;
 	private relinking = false;
@@ -86,15 +125,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					) => this.handleInput(view, from, to, text)
 				)
 			),
-			EditorView.updateListener.of((update) => {
-				if (
-					this.pendingUndo &&
-					update.selectionSet &&
-					!update.docChanged
-				) {
-					this.clearPendingUndo();
-				}
-			}),
+			EditorView.updateListener.of((update) =>
+				this.handleEditorUpdate(
+					update.docChanged,
+					update.selectionSet,
+					update.changes
+				)
+			),
 			Prec.highest(
 				EditorView.domEventHandlers({
 					paste: (event: ClipboardEvent, view: EditorView) => {
@@ -234,10 +271,38 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.stopPeriodicRelink();
 		if (this.relinkDebounceTimer !== null) window.clearTimeout(this.relinkDebounceTimer);
 		this.clearPendingUndo();
+		this.cancelDeferredAutolinks();
 	}
 
 	private normalize(text: string): string {
 		return this.settings.caseInsensitive ? text.toLowerCase() : text;
+	}
+
+	private handleEditorUpdate(
+		docChanged: boolean,
+		selectionSet: boolean,
+		changes?: ChangeDesc
+	) {
+		if (this.pendingUndo && selectionSet && !docChanged) {
+			this.clearPendingUndo();
+		}
+		// Any document change that is not our own autolink dispatch (which
+		// re-records afterwards) makes the recorded coordinates meaningless —
+		// e.g. undo restoring the pre-link text would otherwise make the
+		// record match legitimate edits.
+		if (this.lastAutolink && docChanged) {
+			this.lastAutolink = null;
+		}
+		// Keep pending deferrals aligned with the document: when one deferral
+		// dispatches (or any other change lands), the positions of the queued
+		// ones shift with it. Content is re-verified when each one fires.
+		// assoc -1 anchors positions left, so a deferral scheduled just
+		// before its own trigger's default insertion is not pushed past it.
+		if (docChanged && changes) {
+			for (const d of this.deferredAutolinks) {
+				d.from = changes.mapPos(d.from, -1);
+			}
+		}
 	}
 
 	private static PUNCTUATION_TRIGGERS = ").,!?:;";
@@ -249,6 +314,25 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		text: string
 	): boolean {
 		if (!text) return false;
+
+		// Mobile keyboards (IME/autocorrect) sometimes re-commit the word they
+		// just finished, using coordinates from before our link dispatch
+		// shifted the text. Applying that stale edit corrupts the fresh link
+		// ("UL Dash GmbH" → "[[UL DasGmbHbH]]"), so swallow it instead.
+		if (from !== to && this.isStaleRecommit(view, from, to, text)) {
+			return true;
+		}
+
+		// Some keyboards split the commit into two events: the word
+		// replacement (handled above) and a follow-up space at the pre-link
+		// end-of-word offset. Applied as-is it would land inside the link.
+		if (
+			from === to &&
+			text === " " &&
+			this.isStaleSpaceInsert(view, from)
+		) {
+			return true;
+		}
 
 		if (text === ". ") {
 			if (this.pendingUndo) this.clearPendingUndo();
@@ -274,6 +358,22 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				return true;
 			}
 
+			if (this.isImeActive(view)) {
+				this.scheduleDeferredAutolink(
+					view,
+					from,
+					". ",
+					false,
+					AutoLinkKeywordsPlugin.deferredContext(
+						view.state.doc.sliceString(
+							Math.max(0, from - 24),
+							from
+						),
+						". "
+					)
+				);
+				return false;
+			}
 			return this.tryAutolinkBeforeCursor(view, from, ". ", false, to);
 		}
 
@@ -297,6 +397,26 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			return this.handleUndoOnContinue(view, from, text);
 		}
 
+		if (!AutoLinkKeywordsPlugin.isTriggerChar(text)) return false;
+
+		// Dispatching a document change while an IME composition is active
+		// desynchronizes the keyboard from the editor (CodeMirror applies its
+		// late commits at stale offsets). Let the trigger character through
+		// unchanged and link shortly after the composition has settled.
+		if (this.isImeActive(view)) {
+			this.scheduleDeferredAutolink(
+				view,
+				from,
+				text,
+				text === " ",
+				AutoLinkKeywordsPlugin.deferredContext(
+					view.state.doc.sliceString(Math.max(0, from - 24), from),
+					text
+				)
+			);
+			return false;
+		}
+
 		if (text === " ") {
 			return this.tryAutolinkBeforeCursor(view, from, " ", true);
 		}
@@ -305,11 +425,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			return this.tryAutolinkBeforeCursor(view, from, "\n", false);
 		}
 
-		if (AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(text)) {
-			return this.tryAutolinkBeforeCursor(view, from, text, false);
-		}
-
-		return false;
+		return this.tryAutolinkBeforeCursor(view, from, text, false);
 	}
 
 	private handleEnterKey(view: EditorView): boolean {
@@ -321,7 +437,49 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const sel = view.state.selection.main;
 		if (!sel.empty) return false;
 
+		if (this.isImeActive(view)) {
+			this.scheduleDeferredAutolink(
+				view,
+				sel.head,
+				"\n",
+				false,
+				AutoLinkKeywordsPlugin.deferredContext(
+					view.state.doc.sliceString(
+						Math.max(0, sel.head - 24),
+						sel.head
+					),
+					"\n"
+				)
+			);
+			return false;
+		}
+
 		return this.tryAutolinkBeforeCursor(view, sel.head, "\n", false);
+	}
+
+	private dispatchAutolink(
+		view: EditorView,
+		absStart: number,
+		replaceEnd: number,
+		insert: string,
+		preserveCursor: boolean
+	) {
+		const oldText = view.state.doc.sliceString(absStart, replaceEnd);
+		view.dispatch({
+			changes: { from: absStart, to: replaceEnd, insert },
+			...(preserveCursor
+				? {}
+				: { selection: { anchor: absStart + insert.length } }),
+		});
+		// Recorded after dispatching: the update listener clears any previous
+		// record on doc changes, then we install the fresh one.
+		this.lastAutolink = {
+			view,
+			time: Date.now(),
+			from: absStart,
+			to: replaceEnd,
+			text: oldText,
+		};
 	}
 
 	private tryAutolinkBeforeCursor(
@@ -329,7 +487,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		pos: number,
 		trailing: string,
 		setupPendingUndo: boolean,
-		replaceTo?: number
+		replaceTo?: number,
+		preserveCursor = false
 	): boolean {
 		const state = view.state;
 		const line = state.doc.lineAt(pos);
@@ -346,10 +505,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const absStart = line.from + urlMatch.start;
 			const insert =
 				this.formatUrlAsMarkdownLink(urlMatch.url) + trailing;
-			view.dispatch({
-				changes: { from: absStart, to: replaceEnd, insert },
-				selection: { anchor: absStart + insert.length },
-			});
+			this.dispatchAutolink(
+				view,
+				absStart,
+				replaceEnd,
+				insert,
+				preserveCursor
+			);
 			return true;
 		}
 
@@ -362,10 +524,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const t = sanitize(alias.target);
 			const d = sanitize(alias.displayText);
 			const insert = `[[${t}|${d}]]${trailing}`;
-			view.dispatch({
-				changes: { from: absStart, to: replaceEnd, insert },
-				selection: { anchor: absStart + insert.length },
-			});
+			this.dispatchAutolink(
+				view,
+				absStart,
+				replaceEnd,
+				insert,
+				preserveCursor
+			);
 			return true;
 		}
 
@@ -381,10 +546,13 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				kw.toLowerCase() === tg.toLowerCase()
 					? `[[${kw}]]${trailing}`
 					: `[[${tg}|${kw}]]${trailing}`;
-			view.dispatch({
-				changes: { from: absStart, to: replaceEnd, insert },
-				selection: { anchor: absStart + insert.length },
-			});
+			this.dispatchAutolink(
+				view,
+				absStart,
+				replaceEnd,
+				insert,
+				preserveCursor
+			);
 
 			if (setupPendingUndo) {
 				const kwNorm = this.normalize(direct.keyword);
@@ -421,6 +589,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		to: number,
 		text: string
 	): boolean {
+		// While composing, bulk events are the keyboard's own word updates.
+		// Transforming them mid-composition desynchronizes the keyboard, so
+		// let the commit land untouched and transform it after it settles.
+		if (this.isImeActive(view)) {
+			this.scheduleDeferredBulk(view, from, text);
+			return false;
+		}
+
 		if (this.entries.length === 0) return false;
 		if (text.length > 10000) return false;
 
@@ -456,6 +632,16 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			changes: { from, to, insert: replaced },
 			selection: { anchor: from + replaced.length },
 		});
+		// The keyboard believes its own text now occupies
+		// [from, from + text.length); remember that so a stale re-commit of
+		// (part of) it is recognized and swallowed.
+		this.lastAutolink = {
+			view,
+			time: Date.now(),
+			from,
+			to: from + text.length,
+			text,
+		};
 		return true;
 	}
 
@@ -739,6 +925,242 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			window.clearTimeout(this.pendingUndo.timer);
 			this.pendingUndo = null;
 		}
+	}
+
+	private isImeActive(view: EditorView): boolean {
+		return view.composing || view.compositionStarted;
+	}
+
+	// After we turn typed text into a link, mobile keyboards may re-send the
+	// word they just committed ("GmbH" → "GmbH") using document positions from
+	// BEFORE our dispatch inserted "[[". Detect such re-commits by comparing
+	// the incoming replacement against the recorded pre-link text at the same
+	// (pre-link) coordinates; they carry no new information and must not be
+	// applied to the shifted document.
+	private isStaleRecommit(
+		view: EditorView,
+		from: number,
+		to: number,
+		text: string
+	): boolean {
+		const rec = this.lastAutolink;
+		if (!rec) return false;
+		if (rec.view !== view) return false;
+		if (Date.now() - rec.time > 2000) return false;
+		if (from >= to || from < rec.from) return false;
+
+		let t = text;
+		let end = to;
+		// Tolerate the trigger space being included in the re-commit.
+		if (t.endsWith(" ")) {
+			if (end === rec.to + 1) {
+				end--;
+				t = t.substring(0, t.length - 1);
+			} else if (t.length === end - from + 1) {
+				t = t.substring(0, t.length - 1);
+			}
+		}
+		if (end > rec.to) return false;
+		if (!t.length || t.length !== end - from) return false;
+
+		const old = rec.text.substring(from - rec.from, end - rec.from);
+		return this.normalize(t) === this.normalize(old);
+	}
+
+	private isStaleSpaceInsert(view: EditorView, from: number): boolean {
+		const rec = this.lastAutolink;
+		return (
+			!!rec &&
+			rec.view === view &&
+			Date.now() - rec.time <= 2000 &&
+			from === rec.to
+		);
+	}
+
+	// Expected post-input document content ending at (and including) the
+	// trigger, used to revalidate a deferred autolink. `applied` is the text
+	// the pending default input will insert; it must end with the trigger.
+	private static deferredContext(prefix: string, applied: string): string {
+		const s = prefix + applied;
+		return s.substring(Math.max(0, s.length - 32));
+	}
+
+	private static isTriggerChar(ch: string): boolean {
+		return (
+			ch === " " ||
+			ch === "\n" ||
+			AutoLinkKeywordsPlugin.PUNCTUATION_TRIGGERS.includes(ch)
+		);
+	}
+
+	private scheduleDeferredAutolink(
+		view: EditorView,
+		from: number,
+		trigger: string,
+		setupPendingUndo: boolean,
+		context: string
+	) {
+		this.enqueueDeferred({
+			kind: "trigger",
+			view,
+			from,
+			trigger,
+			setupPendingUndo,
+			context,
+			tries: 0,
+			timer: 0,
+		});
+	}
+
+	private scheduleDeferredBulk(view: EditorView, from: number, text: string) {
+		if (!text || text.length > 10000) return;
+		this.enqueueDeferred({
+			kind: "bulk",
+			view,
+			from,
+			text,
+			tries: 0,
+			timer: 0,
+		});
+	}
+
+	private enqueueDeferred(d: DeferredAutolink) {
+		if (this.deferredAutolinks.length >= 8) {
+			const dropped = this.deferredAutolinks.shift();
+			if (dropped) window.clearTimeout(dropped.timer);
+		}
+		this.deferredAutolinks.push(d);
+		d.timer = window.setTimeout(() => this.runDeferred(d), 50);
+	}
+
+	private runDeferred(d: DeferredAutolink) {
+		const idx = this.deferredAutolinks.indexOf(d);
+		if (idx === -1) return;
+
+		if (this.isImeActive(d.view)) {
+			if (d.tries < 20) {
+				d.tries++;
+				d.timer = window.setTimeout(() => this.runDeferred(d), 50);
+			} else {
+				// Rather link nothing than dispatch into a composition that
+				// refuses to end — a missed link is recoverable, a
+				// desynchronized keyboard corrupts text.
+				this.deferredAutolinks.splice(idx, 1);
+			}
+			return;
+		}
+
+		this.deferredAutolinks.splice(idx, 1);
+		try {
+			if (d.kind === "trigger") {
+				this.fireDeferredTrigger(d);
+			} else {
+				this.fireDeferredBulk(d);
+			}
+		} catch {
+			// The view may have been detached while the timer was pending.
+		}
+	}
+
+	private fireDeferredTrigger(d: DeferredTrigger) {
+		const state = d.view.state;
+		const end = d.from + d.trigger.length;
+		const start = end - d.context.length;
+		// The document may have changed while we waited (late keyboard
+		// commits, further typing, even a file switch in this pane); only
+		// proceed if the surroundings still match what we captured.
+		if (start < 0 || end > state.doc.length) return;
+		if (state.doc.sliceString(start, end) !== d.context) return;
+
+		const sel = state.selection.main;
+		const cursorAtTrigger = sel.empty && sel.head === end;
+		this.tryAutolinkBeforeCursor(
+			d.view,
+			d.from,
+			d.trigger,
+			d.setupPendingUndo && cursorAtTrigger,
+			end,
+			!cursorAtTrigger
+		);
+	}
+
+	private fireDeferredBulk(d: DeferredBulk) {
+		const state = d.view.state;
+		const end = d.from + d.text.length;
+		if (d.from < 0 || end > state.doc.length) return;
+		// Only proceed if the committed text still stands unchanged.
+		if (state.doc.sliceString(d.from, end) !== d.text) return;
+
+		const line = state.doc.lineAt(d.from);
+		const colOffset = d.from - line.from;
+		if (this.isInCodeContext(d.view, d.from, line.text, colOffset))
+			return;
+		if (this.isInsideWikilink(line.text.substring(0, colOffset))) return;
+
+		const file = this.app.workspace.getActiveFile();
+		const selfName = file?.basename ?? "";
+		let regionEnd = end;
+		let finalText = d.text;
+
+		// Pass 1: transform the committed range itself, linking every
+		// keyword/URL inside it (dictated sentences, swiped words).
+		if (this.entries.length > 0) {
+			const charBefore =
+				d.from > 0 ? state.doc.sliceString(d.from - 1, d.from) : "";
+			const charAfter =
+				end < state.doc.length
+					? state.doc.sliceString(end, end + 1)
+					: "";
+			const replaced = this.replaceKeywordsInText(
+				d.text,
+				charBefore,
+				charAfter,
+				selfName
+			);
+			if (replaced !== d.text) {
+				const sel = state.selection.main;
+				const cursorAtEnd = sel.empty && sel.head === end;
+				d.view.dispatch({
+					changes: { from: d.from, to: end, insert: replaced },
+					...(cursorAtEnd
+						? { selection: { anchor: d.from + replaced.length } }
+						: {}),
+				});
+				this.lastAutolink = {
+					view: d.view,
+					time: Date.now(),
+					from: d.from,
+					to: end,
+					text: d.text,
+				};
+				regionEnd = d.from + replaced.length;
+				finalText = replaced;
+			}
+		}
+
+		// Pass 2: a keyword may span the commit boundary (e.g. "UL Dash "
+		// already in the document, "GmbH " committed) — link it via the
+		// regular line-based matcher at the trailing trigger character.
+		const last = finalText.charAt(finalText.length - 1);
+		if (AutoLinkKeywordsPlugin.isTriggerChar(last)) {
+			const sel = d.view.state.selection.main;
+			const cursorAtEnd = sel.empty && sel.head === regionEnd;
+			this.tryAutolinkBeforeCursor(
+				d.view,
+				regionEnd - 1,
+				last,
+				false,
+				regionEnd,
+				!cursorAtEnd
+			);
+		}
+	}
+
+	private cancelDeferredAutolinks() {
+		for (const d of this.deferredAutolinks) {
+			window.clearTimeout(d.timer);
+		}
+		this.deferredAutolinks = [];
 	}
 
 	startPeriodicRelink() {
