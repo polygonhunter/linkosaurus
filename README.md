@@ -82,7 +82,7 @@ Urlaub//B▌
 └──────────────────┘
 ```
 
-Arrow keys to choose, **Enter** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you. Toggleable in settings.
+Arrow keys to choose, **Enter** or **Tab** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you. Toggleable in settings, and both accept keys can be switched on and off individually — turn Enter off if you'd rather keep it for line breaks and link with Tab alone.
 
 ### It learns your vault automatically
 
@@ -166,6 +166,8 @@ Linkosaurus ships with more knobs than most people will ever need — I tried to
 | **Single-word alias delimiter** | Inline alias delimiter for single-word display text (default `//`) |
 | **Multi-word alias delimiter** | Inline alias delimiter for multi-word display text (default `///`) |
 | **Alias target suggestions** | Autocomplete popup for the target part of an alias (on by default) |
+| **Accept suggestion with Enter** | Enter links the highlighted suggestion (on by default) |
+| **Accept suggestion with Tab** | Tab links the highlighted suggestion (on by default) |
 | **Auto-detect vault links** | Use every note name in the vault as a keyword |
 | **Include frontmatter aliases** | Use `aliases:` fields from frontmatter as keywords |
 | **Minimum keyword length** | Floor for auto-detected keyword length (0 = no limit) |

@@ -12,6 +12,7 @@ import {
 	type EditorPosition,
 	type EditorSuggestContext,
 	type EditorSuggestTriggerInfo,
+	type KeymapEventHandler,
 	type SearchResult,
 	type SettingDefinitionItem,
 	type TFile,
@@ -34,6 +35,8 @@ interface AutoLinkSettings {
 	singleWordDelimiter: string;
 	multiWordDelimiter: string;
 	aliasSuggestEnabled: boolean;
+	aliasSuggestEnterAccepts: boolean;
+	aliasSuggestTabAccepts: boolean;
 	urlAutolinkEnabled: boolean;
 	urlAutolinkTlds: string;
 }
@@ -52,6 +55,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	singleWordDelimiter: "//",
 	multiWordDelimiter: "///",
 	aliasSuggestEnabled: true,
+	aliasSuggestEnterAccepts: true,
+	aliasSuggestTabAccepts: true,
 	urlAutolinkEnabled: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
@@ -452,9 +457,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	}
 
 	private handleEnterKey(view: EditorView): boolean {
-		// While the alias suggestion popup is open, Enter belongs to it —
-		// autolinking here as well would apply the same replacement twice.
-		if (this.aliasSuggest?.visible) return false;
+		// While the alias suggestion popup is open and set to accept on Enter,
+		// the keypress belongs to it — autolinking here as well would apply
+		// the same replacement twice.
+		if (this.aliasSuggest?.consumesEnter()) return false;
 
 		if (this.pendingUndo) {
 			this.clearPendingUndo();
@@ -2001,6 +2007,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.multiWordDelimiter = DEFAULT_SETTINGS.multiWordDelimiter;
 		if (typeof this.settings.aliasSuggestEnabled !== "boolean")
 			this.settings.aliasSuggestEnabled = DEFAULT_SETTINGS.aliasSuggestEnabled;
+		if (typeof this.settings.aliasSuggestEnterAccepts !== "boolean")
+			this.settings.aliasSuggestEnterAccepts = DEFAULT_SETTINGS.aliasSuggestEnterAccepts;
+		if (typeof this.settings.aliasSuggestTabAccepts !== "boolean")
+			this.settings.aliasSuggestTabAccepts = DEFAULT_SETTINGS.aliasSuggestTabAccepts;
 		if (typeof this.settings.urlAutolinkEnabled !== "boolean")
 			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
 		if (typeof this.settings.urlAutolinkTlds !== "string")
@@ -2034,11 +2044,54 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 		super(app);
 		this.plugin = plugin;
 		this.limit = 12;
-		this.setInstructions([
-			{ command: "↑↓", purpose: "navigate" },
-			{ command: "↵", purpose: "link" },
-			{ command: "esc", purpose: "dismiss" },
-		]);
+		this.rebindEnter();
+		this.scope.register([], "Tab", (evt: KeyboardEvent) => {
+			if (!this.plugin.settings.aliasSuggestTabAccepts) return true;
+			return this.acceptSelected(evt);
+		});
+	}
+
+	// Whether an Enter keypress will be consumed by the open popup. When the
+	// user turned Enter acceptance off (or rebinding failed and the stock
+	// binding is active), the editor's own Enter handling stays in charge.
+	consumesEnter(): boolean {
+		if (!this.visible) return false;
+		if (!this.enterRebound) return true;
+		return this.plugin.settings.aliasSuggestEnterAccepts;
+	}
+
+	private enterRebound = false;
+
+	// The chooser registers its Enter binding on the popover scope during
+	// construction. Swap it for a setting-aware one so Enter can be released
+	// back to the editor. The handler list is not public API — when it is
+	// missing, the stock binding stays and Enter always accepts.
+	private rebindEnter(): void {
+		const scope = this.scope as unknown as { keys?: KeymapEventHandler[] };
+		if (!Array.isArray(scope.keys)) return;
+		const builtin = scope.keys.filter((h) => h && h.key === "Enter");
+		if (!builtin.length) return;
+		for (const handler of builtin) this.scope.unregister(handler);
+		this.enterRebound = true;
+		this.scope.register([], "Enter", (evt: KeyboardEvent) => {
+			if (!this.plugin.settings.aliasSuggestEnterAccepts) return true;
+			return this.acceptSelected(evt);
+		});
+	}
+
+	// Applies the highlighted suggestion via the chooser. Returns false
+	// (event handled) when a suggestion was used, true to let the key fall
+	// through to the editor.
+	private acceptSelected(evt: KeyboardEvent): boolean {
+		const chooser = (
+			this as unknown as {
+				suggestions?: {
+					useSelectedItem?: (evt: KeyboardEvent) => boolean;
+				};
+			}
+		).suggestions;
+		if (!chooser?.useSelectedItem) return true;
+		return chooser.useSelectedItem(evt) ? false : true;
 	}
 
 	onTrigger(
@@ -2095,6 +2148,14 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 	}
 
 	open(): void {
+		const instructions = [{ command: "↑↓", purpose: "navigate" }];
+		if (!this.enterRebound || this.plugin.settings.aliasSuggestEnterAccepts)
+			instructions.push({ command: "↵", purpose: "link" });
+		if (this.plugin.settings.aliasSuggestTabAccepts)
+			instructions.push({ command: "⇥", purpose: "link" });
+		instructions.push({ command: "esc", purpose: "dismiss" });
+		this.setInstructions(instructions);
+
 		super.open();
 		this.visible = true;
 		this.installPill();
@@ -2282,6 +2343,30 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					type: "toggle",
 					key: "aliasSuggestEnabled",
 					defaultValue: DEFAULT_SETTINGS.aliasSuggestEnabled,
+				},
+			},
+			{
+				name: "Accept suggestion with Enter",
+				desc:
+					"Pressing Enter links the highlighted suggestion. Turn off " +
+					"to keep Enter for line breaks even while the popup is open.",
+				aliases: ["enter", "keybinding"],
+				visible: () => plugin.settings.aliasSuggestEnabled,
+				control: {
+					type: "toggle",
+					key: "aliasSuggestEnterAccepts",
+					defaultValue: DEFAULT_SETTINGS.aliasSuggestEnterAccepts,
+				},
+			},
+			{
+				name: "Accept suggestion with Tab",
+				desc: "Pressing Tab links the highlighted suggestion.",
+				aliases: ["tab", "keybinding"],
+				visible: () => plugin.settings.aliasSuggestEnabled,
+				control: {
+					type: "toggle",
+					key: "aliasSuggestTabAccepts",
+					defaultValue: DEFAULT_SETTINGS.aliasSuggestTabAccepts,
 				},
 			},
 			{
@@ -2486,6 +2571,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 				this.plugin.startPeriodicRelink();
 				return;
+			case "aliasSuggestEnabled":
 			case "scanVaultLinks":
 			case "urlAutolinkEnabled":
 				await this.plugin.saveSettings();
@@ -2671,8 +2757,38 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.aliasSuggestEnabled = value;
 						await this.plugin.saveSettings();
+						this.display();
 					});
 			});
+
+		if (this.plugin.settings.aliasSuggestEnabled) {
+			new Setting(containerEl)
+				.setName("Accept suggestion with Enter")
+				.setDesc(
+					"Pressing Enter links the highlighted suggestion. Turn off " +
+					"to keep Enter for line breaks even while the popup is open."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.aliasSuggestEnterAccepts)
+						.onChange(async (value) => {
+							this.plugin.settings.aliasSuggestEnterAccepts = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Accept suggestion with Tab")
+				.setDesc("Pressing Tab links the highlighted suggestion.")
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.aliasSuggestTabAccepts)
+						.onChange(async (value) => {
+							this.plugin.settings.aliasSuggestTabAccepts = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
 
 		new Setting(containerEl)
 			.setName("Auto-detect vault links")
