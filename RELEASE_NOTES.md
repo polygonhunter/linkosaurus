@@ -1,23 +1,17 @@
-## 🦕 Your aliases now finish themselves
+## 🦕 A quick polish pass
 
-The big one this release: **alias autocomplete**. Start an inline alias, and a little glass panel floats in beside your cursor, suggesting the target before you've typed it.
+3.5.0 brought the alias autocomplete — 3.5.1 makes it squeaky-clean for the Obsidian plugin review, and sneaks in a genuinely nicer settings experience while it's at it.
 
-```
-Urlaub//B▌
-┌──────────────────┐
-│ 🔗 Berlin        │
-│ 🔗 Bielefeld     │
-└──────────────────┘
-```
+### 🔍 Settings you can search
 
-Arrow keys to choose, **Enter** to link — `[[Berlin|Urlaub]]` lands fully formed. No trailing space, no typing out `ielefeld`.
+Linkosaurus adopted Obsidian 1.13's new declarative settings API. Every option now shows up in Obsidian's **global settings search** — try typing "autocomplete", "blocklist", or "delimiter" into the settings search box and jump straight there. On older Obsidian versions the classic settings tab keeps working as before.
 
-### ✨ What's inside
+As a bonus, delimiter validation now shows up as a friendly inline message right under the field, instead of a toast notification.
 
-- **Fuzzy search** — suggestions are drawn live from your note names, keywords, and frontmatter aliases; `Bln` still finds Berlin, and mappings show where they lead (`ML → Machine Learning`).
-- **Zero extra keystrokes** — selecting a suggestion writes the finished wikilink immediately.
-- **A popup that knows its place** — it only appears inside the alias syntax (`//` and `///`, including your custom delimiters). Normal typing stays popup-free, URLs and code blocks stay untouched, and Esc dismisses it without a trace. It never picks for you: type the alias out by hand and everything works exactly as before.
-- **Dressed for the occasion** — frosted-glass panel, a selection pill that glides between entries, and keyboard hints in the footer (`↵ link · esc dismiss`). Matches your theme in light and dark; on phones it steps back to the platform's flat look.
-- **One toggle** — not your thing? *Settings → Alias target suggestions* turns it off.
+### 🧹 Under the hood
 
-Closes #10. Happy linking. 🦕
+- The suggestion popup's gliding pill now positions itself through Obsidian's sanctioned styling API (`setCssStyles`) — the one thing the automated plugin review flagged as an error.
+- The README title is a proper Markdown heading, so automated checks can match it against the manifest.
+- Obsidian API typings pinned to `^1.13.1`.
+
+Nothing about linking itself changed. Happy linking. 🦕
