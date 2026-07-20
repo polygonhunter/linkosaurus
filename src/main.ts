@@ -13,6 +13,7 @@ import {
 	type EditorSuggestContext,
 	type EditorSuggestTriggerInfo,
 	type SearchResult,
+	type SettingDefinitionItem,
 	type TFile,
 } from "obsidian";
 import { EditorView } from "@codemirror/view";
@@ -207,7 +208,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				editor.replaceSelection(`[[${safe}]]`);
 
 				if (!this.manualLookup.has(this.normalize(text))) {
-					const list = this.settings.keywordList.trimEnd();
+					const list = this.settings.keywordList.replace(/\s+$/, "");
 					const sep = list ? "\n" : "";
 					this.settings.keywordList = list + sep + text;
 					void this.saveSettings();
@@ -2141,12 +2142,14 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 
 		const selected = list.querySelector(".suggestion-item.is-selected");
 		if (!(selected instanceof HTMLElement)) {
-			this.pill.style.opacity = "0";
+			this.pill.setCssStyles({ opacity: "0" });
 			return;
 		}
-		this.pill.style.opacity = "1";
-		this.pill.style.transform = `translateY(${selected.offsetTop}px)`;
-		this.pill.style.height = `${selected.offsetHeight}px`;
+		this.pill.setCssStyles({
+			opacity: "1",
+			transform: `translateY(${selected.offsetTop}px)`,
+			height: `${selected.offsetHeight}px`,
+		});
 	}
 
 	private removePill(): void {
@@ -2165,11 +2168,335 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display() {
-		const { containerEl } = this;
-		containerEl.empty();
+	// Declarative settings for Obsidian 1.13+: rendered by the framework and
+	// indexed by the global settings search. Values are read from
+	// plugin.settings by the default getControlValue; writes flow through
+	// setControlValue below. Textareas stay imperative render rows so they
+	// keep their monospace styling and debounced parsing.
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const plugin = this.plugin;
+		const vaultScanOn = () => plugin.settings.scanVaultLinks;
 
-		const desc = containerEl.createDiv({ cls: "linkosaurus-desc" });
+		const monoTextArea = (
+			setting: Setting,
+			opts: {
+				name: string;
+				desc?: string;
+				rows: number;
+				placeholder?: string;
+				value: () => string;
+				onChange: (value: string) => void;
+			}
+		) => {
+			setting.setName(opts.name);
+			if (opts.desc) setting.setDesc(opts.desc);
+			setting
+				.setClass("linkosaurus-textarea-mono")
+				.addTextArea((text) => {
+					text.inputEl.rows = opts.rows;
+					if (opts.placeholder) text.setPlaceholder(opts.placeholder);
+					text.setValue(opts.value()).onChange(opts.onChange);
+				});
+		};
+
+		return [
+			{
+				name: "Keyword list syntax",
+				searchable: false,
+				render: (setting: Setting) => {
+					setting.settingEl.empty();
+					setting.settingEl.addClass("linkosaurus-desc");
+					this.buildIntro(setting.settingEl);
+				},
+			},
+			{
+				name: "Keyword list",
+				aliases: ["keywords", "manual keywords"],
+				render: (setting: Setting) =>
+					monoTextArea(setting, {
+						name: "Keyword list",
+						rows: 28,
+						value: () => plugin.settings.keywordList,
+						onChange: (value) => {
+							plugin.settings.keywordList = value;
+							plugin.parseManualKeywords();
+							plugin.debouncedSave();
+						},
+					}),
+			},
+			{
+				name: "Case-insensitive matching",
+				desc: "Match keywords regardless of upper/lower case.",
+				control: {
+					type: "toggle",
+					key: "caseInsensitive",
+					defaultValue: DEFAULT_SETTINGS.caseInsensitive,
+				},
+			},
+			{
+				name: "Single-word alias delimiter",
+				desc:
+					"Delimiter between display text and keyword for single-word aliases. " +
+					"Example: trip//Tokyo → [[Tokyo|trip]]",
+				aliases: ["alias"],
+				control: {
+					type: "text",
+					key: "singleWordDelimiter",
+					defaultValue: DEFAULT_SETTINGS.singleWordDelimiter,
+					placeholder: "//",
+					validate: (value: string) => {
+						if (!value) return "The delimiter cannot be empty.";
+						if (value === plugin.settings.multiWordDelimiter)
+							return "Single-word and multi-word delimiters must be different.";
+						return;
+					},
+				},
+			},
+			{
+				name: "Multi-word alias delimiter",
+				desc:
+					"Delimiter that wraps display text for multi-word aliases. " +
+					"Example: ///cherry blossoms///Tokyo → [[Tokyo|cherry blossoms]]",
+				aliases: ["alias"],
+				control: {
+					type: "text",
+					key: "multiWordDelimiter",
+					defaultValue: DEFAULT_SETTINGS.multiWordDelimiter,
+					placeholder: "///",
+					validate: (value: string) => {
+						if (!value) return "The delimiter cannot be empty.";
+						if (value === plugin.settings.singleWordDelimiter)
+							return "Single-word and multi-word delimiters must be different.";
+						return;
+					},
+				},
+			},
+			{
+				name: "Alias target suggestions",
+				desc:
+					"While typing the target part of an alias (e.g. trip//To), " +
+					"show a popup suggesting matching targets. Selecting one " +
+					"creates the link immediately.",
+				aliases: ["autocomplete", "popup", "suggestions"],
+				control: {
+					type: "toggle",
+					key: "aliasSuggestEnabled",
+					defaultValue: DEFAULT_SETTINGS.aliasSuggestEnabled,
+				},
+			},
+			{
+				name: "Auto-detect vault links",
+				desc: "Automatically use all note names and existing wikilinks from the vault as keywords.",
+				aliases: ["vault scan"],
+				control: {
+					type: "toggle",
+					key: "scanVaultLinks",
+					defaultValue: DEFAULT_SETTINGS.scanVaultLinks,
+				},
+			},
+			{
+				name: "Include frontmatter aliases",
+				desc: "Use aliases defined in note frontmatter (aliases/alias field) as additional keywords.",
+				visible: vaultScanOn,
+				control: {
+					type: "toggle",
+					key: "scanFrontmatterAliases",
+					defaultValue: DEFAULT_SETTINGS.scanFrontmatterAliases,
+				},
+			},
+			{
+				name: "Minimum keyword length",
+				desc: "Ignore auto-detected keywords shorter than this (0 = no limit). Does not affect manual keywords.",
+				visible: vaultScanOn,
+				control: {
+					type: "number",
+					key: "minKeywordLength",
+					defaultValue: DEFAULT_SETTINGS.minKeywordLength,
+					min: 0,
+					max: 50,
+				},
+			},
+			{
+				name: "Blocklist",
+				desc: "Keywords to exclude from auto-linking (one per line). Does not affect manual keywords.",
+				visible: vaultScanOn,
+				render: (setting: Setting) =>
+					monoTextArea(setting, {
+						name: "Blocklist",
+						desc: "Keywords to exclude from auto-linking (one per line). Does not affect manual keywords.",
+						rows: 6,
+						placeholder: "Home\nInbox\nDaily",
+						value: () => plugin.settings.blocklist,
+						onChange: (value) => {
+							plugin.settings.blocklist = value;
+							plugin.parseBlocklist();
+							plugin.parseManualKeywords();
+							plugin.debouncedSave();
+						},
+					}),
+			},
+			{
+				name: "Folder filter mode",
+				desc: "Choose whether the listed folders are excluded or are the only ones included.",
+				visible: vaultScanOn,
+				control: {
+					type: "dropdown",
+					key: "folderFilterMode",
+					defaultValue: DEFAULT_SETTINGS.folderFilterMode,
+					options: {
+						exclude: "Exclude listed folders",
+						include: "Include only listed folders",
+					},
+				},
+			},
+			{
+				name: "Folder filter",
+				desc: "Folders to include or exclude from vault scanning (one per line).",
+				visible: vaultScanOn,
+				render: (setting: Setting) =>
+					monoTextArea(setting, {
+						name: "Folder filter",
+						desc: "Folders to include or exclude from vault scanning (one per line).",
+						rows: 4,
+						placeholder: "Templates\nDaily Notes",
+						value: () => plugin.settings.folderFilter,
+						onChange: (value) => {
+							plugin.settings.folderFilter = value;
+							plugin.debouncedSave();
+						},
+					}),
+			},
+			{
+				type: "group",
+				heading: "Periodic auto-relink",
+				visible: vaultScanOn,
+				items: [
+					{
+						name: "Enable periodic auto-relink",
+						desc:
+							"Periodically scan all notes and retroactively convert plain-text keywords to wikilinks. " +
+							"Notes currently open in the editor are skipped to avoid cursor jumps.",
+						control: {
+							type: "toggle",
+							key: "periodicRelink",
+							defaultValue: DEFAULT_SETTINGS.periodicRelink,
+						},
+					},
+					{
+						name: "Relink interval (minutes)",
+						desc: "How often to scan the vault for unlinkable keywords (1–60 minutes).",
+						visible: () => plugin.settings.periodicRelink,
+						control: {
+							type: "number",
+							key: "periodicRelinkIntervalMinutes",
+							defaultValue:
+								DEFAULT_SETTINGS.periodicRelinkIntervalMinutes,
+							min: 1,
+							max: 60,
+						},
+					},
+				],
+			},
+			{
+				name: "Auto-link website URLs",
+				desc:
+					"Convert URLs to Markdown links while typing or pasting. " +
+					"Detects http(s)://... and bare domains (e.g. example.com).",
+				visible: vaultScanOn,
+				control: {
+					type: "toggle",
+					key: "urlAutolinkEnabled",
+					defaultValue: DEFAULT_SETTINGS.urlAutolinkEnabled,
+				},
+			},
+			{
+				name: "URL top-level domains",
+				desc:
+					"TLDs to detect for bare domains (one per line, without leading dot). " +
+					"Only affects bare domains — http(s):// URLs always link.",
+				visible: () =>
+					plugin.settings.scanVaultLinks &&
+					plugin.settings.urlAutolinkEnabled,
+				render: (setting: Setting) =>
+					monoTextArea(setting, {
+						name: "URL top-level domains",
+						desc:
+							"TLDs to detect for bare domains (one per line, without leading dot). " +
+							"Only affects bare domains — http(s):// URLs always link.",
+						rows: 6,
+						placeholder: "de\ncom\norg",
+						value: () => plugin.settings.urlAutolinkTlds,
+						onChange: (value) => {
+							plugin.settings.urlAutolinkTlds = value;
+							plugin.parseTlds();
+							plugin.debouncedSave();
+						},
+					}),
+			},
+			{
+				name: "Auto-detected keywords",
+				searchable: false,
+				visible: vaultScanOn,
+				render: (setting: Setting) => {
+					setting.settingEl.empty();
+					this.buildVaultDetails(setting.settingEl);
+				},
+			},
+		];
+	}
+
+	// Re-evaluates visibility of declaratively defined settings. Only ever
+	// reached on Obsidian 1.13+ (setControlValue is called by the declarative
+	// renderer), where update() exists — older versions never get here, so
+	// the guarded indirection keeps the plugin loadable on minAppVersion.
+	private refreshDefinitions() {
+		(this as { update?: () => void }).update?.();
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		const settings = this.plugin.settings as unknown as Record<
+			string,
+			unknown
+		>;
+		settings[key] = value;
+
+		switch (key) {
+			case "singleWordDelimiter":
+			case "multiWordDelimiter": {
+				await this.plugin.saveSettings();
+				const sw = this.plugin.settings.singleWordDelimiter;
+				const mw = this.plugin.settings.multiWordDelimiter;
+				if (sw.includes(mw) || mw.includes(sw)) {
+					new Notice(
+						"Warning: one delimiter is a substring of the other. This may cause parsing conflicts."
+					);
+				}
+				return;
+			}
+			case "periodicRelink":
+				await this.plugin.saveSettings();
+				if (value) {
+					this.plugin.startPeriodicRelink();
+				} else {
+					this.plugin.stopPeriodicRelink();
+				}
+				this.refreshDefinitions();
+				return;
+			case "periodicRelinkIntervalMinutes":
+				await this.plugin.saveSettings();
+				this.plugin.startPeriodicRelink();
+				return;
+			case "scanVaultLinks":
+			case "urlAutolinkEnabled":
+				await this.plugin.saveSettings();
+				this.refreshDefinitions();
+				return;
+			default:
+				await this.plugin.saveSettings();
+		}
+	}
+
+	private buildIntro(desc: HTMLElement) {
 		desc.createSpan({
 			text: "One keyword per line. Lines starting with ",
 		});
@@ -2208,6 +2535,32 @@ class AutoLinkSettingTab extends PluginSettingTab {
 		desc.createSpan({
 			text: " command (assign a hotkey in Settings → Hotkeys).",
 		});
+	}
+
+	private buildVaultDetails(containerEl: HTMLElement) {
+		const vault = this.plugin.getVaultKeywords();
+		const details = containerEl.createEl("details", {
+			cls: "linkosaurus-details",
+		});
+		details.createEl("summary", {
+			cls: "linkosaurus-details-summary",
+			text: `Auto-detected keywords (${vault.length})`,
+		});
+		if (vault.length > 0) {
+			details.createDiv({
+				cls: "linkosaurus-details-list",
+				text: vault.join("\n"),
+			});
+		}
+	}
+
+	// Fallback for Obsidian < 1.13; newer versions render from
+	// getSettingDefinitions() and never call this.
+	display() {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		this.buildIntro(containerEl.createDiv({ cls: "linkosaurus-desc" }));
 
 		new Setting(containerEl)
 			.setName("Keyword list")
@@ -2511,20 +2864,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					});
 			}
 
-			const vault = this.plugin.getVaultKeywords();
-			const details = containerEl.createEl("details", {
-				cls: "linkosaurus-details",
-			});
-			details.createEl("summary", {
-				cls: "linkosaurus-details-summary",
-				text: `Auto-detected keywords (${vault.length})`,
-			});
-			if (vault.length > 0) {
-				details.createDiv({
-					cls: "linkosaurus-details-list",
-					text: vault.join("\n"),
-				});
-			}
+			this.buildVaultDetails(containerEl);
 		}
 	}
 }

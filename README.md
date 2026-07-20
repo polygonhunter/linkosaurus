@@ -2,9 +2,13 @@
   <img src="linkosaurus.svg" alt="Linkosaurus" width="200">
 </p>
 
-<h1 align="center">Linkosaurus</h1>
+<div align="center">
 
-<p align="center"><b>Your vault links itself.</b></p>
+# Linkosaurus
+
+**Your vault links itself.**
+
+</div>
 
 Linkosaurus turns plain text into wikilinks *as you type*. Write a keyword, press Space — and the link is already there. No reaching for `[[`, no autocomplete popup to fight, no breaking your train of thought. You just write, and your notes quietly weave themselves together.
 
