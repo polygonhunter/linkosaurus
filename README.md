@@ -30,6 +30,8 @@ Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin y
 | `youtube.com ` | `[youtube.com](https://youtube.com) ` |
 | `https://www.example.com/blog ` | `[example.com/blog](https://www.example.com/blog) ` |
 
+And while you're writing an inline alias, an autocomplete popup floats in beside the cursor and suggests the target as you type — **Enter** or **Tab** drops the finished link. On by default, one switch turns it off.
+
 ## Features
 
 ### Auto-link while you type
@@ -82,7 +84,9 @@ Urlaub//B▌
 └──────────────────┘
 ```
 
-Arrow keys to choose, **Enter** or **Tab** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you. Toggleable in settings, and both accept keys can be switched on and off individually — turn Enter off if you'd rather keep it for line breaks and link with Tab alone.
+Arrow keys to choose, **Enter** or **Tab** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you.
+
+The whole thing is **on by default** and lives behind a single switch — *Settings → Alias target suggestions* — if you'd rather write without it. Both accept keys have their own toggle on top: turn Enter off to keep it for line breaks and link with Tab alone, or the other way around.
 
 ### It learns your vault automatically
 
