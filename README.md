@@ -66,6 +66,20 @@ trip//Tokyo  →  [[Tokyo|trip]]
 
 The target on the right must exist in your keyword list, and both delimiters are configurable.
 
+### Alias autocomplete
+
+You don't have to remember the target's exact name. The moment you start typing the target part of an alias, a small panel floats in beside the cursor with matching suggestions — fuzzy-matched from your note names, keywords, and frontmatter aliases:
+
+```
+Urlaub//B▌
+┌──────────────────┐
+│ 🔗 Berlin        │
+│ 🔗 Bielefeld     │
+└──────────────────┘
+```
+
+Arrow keys to choose, **Enter** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you. Toggleable in settings.
+
 ### It learns your vault automatically
 
 With vault scanning on (the default), every note name becomes a keyword the moment the note exists — create `Project Aurora.md` and it's instantly auto-linkable everywhere. Linkosaurus also picks up wikilinks pointing at notes you *haven't written yet*, so you can link forward and let the notes catch up later.
@@ -147,6 +161,7 @@ Linkosaurus ships with more knobs than most people will ever need — I tried to
 | **Case-insensitive matching** | Ignore case when matching |
 | **Single-word alias delimiter** | Inline alias delimiter for single-word display text (default `//`) |
 | **Multi-word alias delimiter** | Inline alias delimiter for multi-word display text (default `///`) |
+| **Alias target suggestions** | Autocomplete popup for the target part of an alias (on by default) |
 | **Auto-detect vault links** | Use every note name in the vault as a keyword |
 | **Include frontmatter aliases** | Use `aliases:` fields from frontmatter as keywords |
 | **Minimum keyword length** | Floor for auto-detected keyword length (0 = no limit) |

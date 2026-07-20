@@ -2,7 +2,7 @@
 
 ## Ein Befehl — fertig
 
-Nachdem du deine Code-Änderungen gemacht hast, tippe einfach:
+Schreibe zuerst die Patchnotes in `RELEASE_NOTES.md` — sie werden der Text des GitHub-Releases. Danach tippe einfach:
 
 ```bash
 npm run release
@@ -32,3 +32,4 @@ Das Format ist `X.Y.Z`:
 |---------|--------|
 | Release wurde nicht erstellt | Prüfe ob `manifest.json` geändert und gepusht wurde |
 | Nutzer sehen das Update nicht | Kann bis zu 24h dauern, bis Obsidian es erkennt |
+| Release zeigt alte Patchnotes | `RELEASE_NOTES.md` vor dem Release aktualisieren |

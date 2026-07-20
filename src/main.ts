@@ -1,4 +1,20 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice } from "obsidian";
+import {
+	Plugin,
+	PluginSettingTab,
+	App,
+	Setting,
+	Notice,
+	EditorSuggest,
+	prepareFuzzySearch,
+	renderMatches,
+	setIcon,
+	type Editor,
+	type EditorPosition,
+	type EditorSuggestContext,
+	type EditorSuggestTriggerInfo,
+	type SearchResult,
+	type TFile,
+} from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, type ChangeDesc } from "@codemirror/state";
@@ -16,6 +32,7 @@ interface AutoLinkSettings {
 	periodicRelinkIntervalMinutes: number;
 	singleWordDelimiter: string;
 	multiWordDelimiter: string;
+	aliasSuggestEnabled: boolean;
 	urlAutolinkEnabled: boolean;
 	urlAutolinkTlds: string;
 }
@@ -33,6 +50,7 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	periodicRelinkIntervalMinutes: 5,
 	singleWordDelimiter: "//",
 	multiWordDelimiter: "///",
+	aliasSuggestEnabled: true,
 	urlAutolinkEnabled: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
@@ -107,6 +125,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private relinkTimer: number | null = null;
 	private relinkDebounceTimer: number | null = null;
 	private relinking = false;
+	private aliasSuggest: AliasTargetSuggest | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -152,6 +171,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				})
 			),
 		]);
+
+		this.aliasSuggest = new AliasTargetSuggest(this.app, this);
+		this.registerEditorSuggest(this.aliasSuggest);
 
 		this.addCommand({
 			id: "link-and-add-keyword",
@@ -429,6 +451,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	}
 
 	private handleEnterKey(view: EditorView): boolean {
+		// While the alias suggestion popup is open, Enter belongs to it —
+		// autolinking here as well would apply the same replacement twice.
+		if (this.aliasSuggest?.visible) return false;
+
 		if (this.pendingUndo) {
 			this.clearPendingUndo();
 			return false;
@@ -1565,26 +1591,27 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return lastOpen > lastClose;
 	}
 
+	// Longer delimiter first, so a triple-slash input is never claimed by the
+	// double-slash rule when one delimiter is a substring of the other.
+	private aliasChecks(): { kind: "single" | "multi"; delim: string }[] {
+		const sw = this.settings.singleWordDelimiter;
+		const mw = this.settings.multiWordDelimiter;
+		if (sw.length > mw.length) {
+			return [
+				{ kind: "single", delim: sw },
+				{ kind: "multi", delim: mw },
+			];
+		}
+		return [
+			{ kind: "multi", delim: mw },
+			{ kind: "single", delim: sw },
+		];
+	}
+
 	private matchAlias(
 		textBefore: string
 	): { displayText: string; target: string; start: number } | null {
-		const sw = this.settings.singleWordDelimiter;
-		const mw = this.settings.multiWordDelimiter;
-
-		type Check = { kind: "single" | "multi"; delim: string };
-		const checks: Check[] = [];
-		if (sw.length > mw.length) {
-			checks.push({ kind: "single", delim: sw });
-			checks.push({ kind: "multi", delim: mw });
-		} else if (sw.length < mw.length) {
-			checks.push({ kind: "multi", delim: mw });
-			checks.push({ kind: "single", delim: sw });
-		} else {
-			checks.push({ kind: "multi", delim: mw });
-			checks.push({ kind: "single", delim: sw });
-		}
-
-		for (const check of checks) {
+		for (const check of this.aliasChecks()) {
 			const result =
 				check.kind === "multi"
 					? this.matchMultiWordAlias(textBefore, check.delim)
@@ -1652,28 +1679,177 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return { displayText, target, start: firstIdx };
 	}
 
+	// ---- Alias target suggestions (issue #10) ----
+	// Same shape as matchAlias(), but the target may still be half-typed, so
+	// there is no lookup — the partial target becomes the popup query instead.
+
+	private matchAliasPrefix(
+		textBefore: string
+	): { start: number; displayText: string; query: string } | null {
+		for (const check of this.aliasChecks()) {
+			const result =
+				check.kind === "multi"
+					? this.matchMultiWordAliasPrefix(textBefore, check.delim)
+					: this.matchSingleWordAliasPrefix(textBefore, check.delim);
+			if (result) return result;
+		}
+		return null;
+	}
+
+	private matchSingleWordAliasPrefix(
+		textBefore: string,
+		delim: string
+	): { start: number; displayText: string; query: string } | null {
+		const idx = textBefore.lastIndexOf(delim);
+		if (idx === -1) return null;
+		if (idx > 0 && textBefore.charAt(idx - 1) === ":") return null;
+
+		const query = textBefore.substring(idx + delim.length);
+		if (/\s/.test(query)) return null;
+
+		const preceding = textBefore.substring(0, idx);
+		let displayStart = 0;
+		for (let j = preceding.length - 1; j >= 0; j--) {
+			if (!/[\p{L}\p{N}]/u.test(preceding.charAt(j))) {
+				displayStart = j + 1;
+				break;
+			}
+		}
+		const displayText = preceding.substring(displayStart);
+		if (!displayText) return null;
+
+		if (textBefore.substring(displayStart, displayStart + 2) === "[[")
+			return null;
+
+		return { start: displayStart, displayText, query };
+	}
+
+	private matchMultiWordAliasPrefix(
+		textBefore: string,
+		delim: string
+	): { start: number; displayText: string; query: string } | null {
+		const secondIdx = textBefore.lastIndexOf(delim);
+		if (secondIdx === -1) return null;
+
+		const query = textBefore.substring(secondIdx + delim.length);
+		if (/\s/.test(query)) return null;
+
+		const beforeSecond = textBefore.substring(0, secondIdx);
+		const firstIdx = beforeSecond.lastIndexOf(delim);
+		if (firstIdx === -1) return null;
+		if (firstIdx > 0 && textBefore.charAt(firstIdx - 1) === ":") return null;
+
+		const displayText = beforeSecond.substring(firstIdx + delim.length);
+		if (!displayText) return null;
+
+		if (textBefore.substring(firstIdx, firstIdx + 2) === "[[")
+			return null;
+
+		return { start: firstIdx, displayText, query };
+	}
+
+	getAliasSuggestTrigger(
+		cursor: EditorPosition,
+		editor: Editor
+	): (EditorSuggestTriggerInfo & { displayText: string }) | null {
+		if (!this.settings.aliasSuggestEnabled) return null;
+
+		const line = editor.getLine(cursor.line);
+		const textBefore = line.substring(0, cursor.ch);
+		if (!textBefore) return null;
+
+		// The CM6 view behind the Obsidian editor is not part of the public
+		// API; without it the composition and code-context checks are skipped.
+		const view = (editor as unknown as { cm?: EditorView }).cm;
+		if (view && this.isImeActive(view)) return null;
+		if (this.isInsideWikilink(textBefore)) return null;
+		if (
+			view &&
+			this.isInCodeContext(
+				view,
+				editor.posToOffset(cursor),
+				line,
+				cursor.ch
+			)
+		)
+			return null;
+
+		const prefix = this.matchAliasPrefix(textBefore);
+		if (!prefix) return null;
+
+		return {
+			start: { line: cursor.line, ch: prefix.start },
+			end: cursor,
+			query: prefix.query,
+			displayText: prefix.displayText,
+		};
+	}
+
+	getAliasSuggestions(
+		query: string,
+		activeFile: TFile | null
+	): AliasSuggestion[] {
+		const selfNorm = activeFile
+			? this.normalize(activeFile.basename)
+			: null;
+		const candidates = this.entries.filter(
+			(e) => selfNorm === null || this.normalize(e.target) !== selfNorm
+		);
+
+		if (!query) {
+			return candidates
+				.sort((a, b) => a.keyword.localeCompare(b.keyword))
+				.map((entry) => ({ entry, match: null }));
+		}
+
+		const fuzzy = prepareFuzzySearch(query);
+		const scored: { entry: KeywordEntry; match: SearchResult }[] = [];
+		for (const entry of candidates) {
+			const match = fuzzy(entry.keyword);
+			if (match) scored.push({ entry, match });
+		}
+		scored.sort((a, b) => b.match.score - a.match.score);
+		return scored;
+	}
+
+	applyAliasSuggestion(
+		context: EditorSuggestContext,
+		entry: KeywordEntry,
+		displayText: string
+	) {
+		const t = sanitize(entry.target);
+		const d = sanitize(displayText);
+		if (!t || !d) return;
+		const insert = `[[${t}|${d}]]`;
+
+		const editor = context.editor;
+		const view = (editor as unknown as { cm?: EditorView }).cm;
+		if (view) {
+			// dispatchAutolink also records the replacement, which keeps the
+			// stale IME/autocorrect re-commit protection working for links
+			// created through the popup.
+			this.dispatchAutolink(
+				view,
+				editor.posToOffset(context.start),
+				editor.posToOffset(context.end),
+				insert,
+				false
+			);
+		} else {
+			editor.replaceRange(insert, context.start, context.end);
+			editor.setCursor({
+				line: context.start.line,
+				ch: context.start.ch + insert.length,
+			});
+		}
+	}
+
 	private matchAliasInText(
 		text: string,
 		pos: number,
 		skipNorm?: string
 	): { replacement: string; end: number } | null {
-		const sw = this.settings.singleWordDelimiter;
-		const mw = this.settings.multiWordDelimiter;
-
-		type Check = { kind: "single" | "multi"; delim: string };
-		const checks: Check[] = [];
-		if (sw.length > mw.length) {
-			checks.push({ kind: "single", delim: sw });
-			checks.push({ kind: "multi", delim: mw });
-		} else if (sw.length < mw.length) {
-			checks.push({ kind: "multi", delim: mw });
-			checks.push({ kind: "single", delim: sw });
-		} else {
-			checks.push({ kind: "multi", delim: mw });
-			checks.push({ kind: "single", delim: sw });
-		}
-
-		for (const check of checks) {
+		for (const check of this.aliasChecks()) {
 			const result =
 				check.kind === "multi"
 					? this.matchMultiWordAliasInText(text, pos, check.delim, skipNorm)
@@ -1822,6 +1998,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.singleWordDelimiter = DEFAULT_SETTINGS.singleWordDelimiter;
 		if (typeof this.settings.multiWordDelimiter !== "string" || !this.settings.multiWordDelimiter)
 			this.settings.multiWordDelimiter = DEFAULT_SETTINGS.multiWordDelimiter;
+		if (typeof this.settings.aliasSuggestEnabled !== "boolean")
+			this.settings.aliasSuggestEnabled = DEFAULT_SETTINGS.aliasSuggestEnabled;
 		if (typeof this.settings.urlAutolinkEnabled !== "boolean")
 			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
 		if (typeof this.settings.urlAutolinkTlds !== "string")
@@ -1836,6 +2014,146 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.settings.scanVaultLinks) {
 			this.scheduleScan();
 		}
+	}
+}
+
+interface AliasSuggestion {
+	entry: KeywordEntry;
+	match: SearchResult | null;
+}
+
+class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
+	private plugin: AutoLinkKeywordsPlugin;
+	private displayText = "";
+	private pill: HTMLElement | null = null;
+	private pillObserver: MutationObserver | null = null;
+	visible = false;
+
+	constructor(app: App, plugin: AutoLinkKeywordsPlugin) {
+		super(app);
+		this.plugin = plugin;
+		this.limit = 12;
+		this.setInstructions([
+			{ command: "↑↓", purpose: "navigate" },
+			{ command: "↵", purpose: "link" },
+			{ command: "esc", purpose: "dismiss" },
+		]);
+	}
+
+	onTrigger(
+		cursor: EditorPosition,
+		editor: Editor
+	): EditorSuggestTriggerInfo | null {
+		const trigger = this.plugin.getAliasSuggestTrigger(cursor, editor);
+		if (!trigger) return null;
+		this.displayText = trigger.displayText;
+		return trigger;
+	}
+
+	getSuggestions(context: EditorSuggestContext): AliasSuggestion[] {
+		return this.plugin.getAliasSuggestions(
+			context.query,
+			context.file ?? null
+		);
+	}
+
+	renderSuggestion(suggestion: AliasSuggestion, el: HTMLElement): void {
+		el.addClass("linkosaurus-suggest-item");
+
+		const chip = el.createDiv({ cls: "linkosaurus-suggest-chip" });
+		setIcon(chip, "link");
+
+		const body = el.createDiv({ cls: "linkosaurus-suggest-body" });
+		const title = body.createDiv({ cls: "linkosaurus-suggest-title" });
+		if (suggestion.match) {
+			renderMatches(
+				title,
+				suggestion.entry.keyword,
+				suggestion.match.matches
+			);
+		} else {
+			title.setText(suggestion.entry.keyword);
+		}
+		if (suggestion.entry.target !== suggestion.entry.keyword) {
+			body.createDiv({
+				cls: "linkosaurus-suggest-sub",
+				text: `→ ${suggestion.entry.target}`,
+			});
+		}
+	}
+
+	selectSuggestion(suggestion: AliasSuggestion): void {
+		const context = this.context;
+		if (!context) return;
+		this.plugin.applyAliasSuggestion(
+			context,
+			suggestion.entry,
+			this.displayText
+		);
+		this.close();
+	}
+
+	open(): void {
+		super.open();
+		this.visible = true;
+		this.installPill();
+	}
+
+	close(): void {
+		super.close();
+		this.visible = false;
+		this.removePill();
+	}
+
+	// The popover element is not part of the public API; when it is missing,
+	// the popup silently falls back to Obsidian's default look.
+	private popoverEl(): HTMLElement | null {
+		const el = (this as unknown as { suggestEl?: HTMLElement }).suggestEl;
+		return el instanceof HTMLElement ? el : null;
+	}
+
+	private installPill(): void {
+		const popover = this.popoverEl();
+		if (!popover) return;
+		popover.addClass("linkosaurus-alias-suggest");
+
+		const list = popover.querySelector(".suggestion");
+		if (!(list instanceof HTMLElement)) return;
+
+		this.pill = createDiv({ cls: "linkosaurus-suggest-pill" });
+		list.prepend(this.pill);
+
+		// Obsidian rebuilds the item elements on every keystroke and moves the
+		// selection class around; both arrive here as mutations.
+		this.pillObserver = new MutationObserver(() => this.movePill(list));
+		this.pillObserver.observe(list, {
+			subtree: true,
+			childList: true,
+			attributes: true,
+			attributeFilter: ["class"],
+		});
+		this.movePill(list);
+	}
+
+	private movePill(list: HTMLElement): void {
+		if (!this.pill) return;
+		if (!this.pill.isConnected) list.prepend(this.pill);
+
+		const selected = list.querySelector(".suggestion-item.is-selected");
+		if (!(selected instanceof HTMLElement)) {
+			this.pill.style.opacity = "0";
+			return;
+		}
+		this.pill.style.opacity = "1";
+		this.pill.style.transform = `translateY(${selected.offsetTop}px)`;
+		this.pill.style.height = `${selected.offsetHeight}px`;
+	}
+
+	private removePill(): void {
+		this.pillObserver?.disconnect();
+		this.pillObserver = null;
+		this.pill?.remove();
+		this.pill = null;
 	}
 }
 
@@ -1984,6 +2302,22 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						) {
 							new Notice("Warning: one delimiter is a substring of the other. This may cause parsing conflicts.");
 						}
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Alias target suggestions")
+			.setDesc(
+				"While typing the target part of an alias (e.g. trip//To), " +
+				"show a popup suggesting matching targets. Selecting one " +
+				"creates the link immediately."
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.aliasSuggestEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.aliasSuggestEnabled = value;
+						await this.plugin.saveSettings();
 					});
 			});
 
