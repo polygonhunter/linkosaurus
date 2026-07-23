@@ -1,9 +1,15 @@
-## 🦕 The search gets right of way
+## 🦕 4.0 — A fresh coat of feathers
 
-Quick fix for a rough edge in yesterday's note search: the auto-linker was linking words *inside* your search.
+No new buttons, no new bugs — 4.0 is all about the words. The entire documentation got a ground-up rewrite: cleaner, funnier, and with simple examples any vault can relate to.
 
-Typing `;;Eibel - IT` used to fall apart at the first space — the auto-linker saw a finished word, turned it into `[[Eibel]]` mid-search, and the popup vanished with the `;;` left behind.
+### 📖 What changed
 
-Now an active search owns its query. While you're typing after `;;`, the auto-linker stays quiet — spaces, separators and all — and the popup keeps filtering until you pick a note, press Esc, or move on. `;;Eibel - IT` → **Enter** → `[[Eibel - IT Termin]]`, exactly as intended.
+- **The README reads like it should** — every feature explained with crisp, generic examples (the resident T-Rex now handles the demos, and yes, he has a Facebook page).
+- **Settings descriptions polished** — same options, clearer words.
+- **Release notes archive tidied up** — older release texts were refreshed to match the new examples.
 
-Nothing else changed. Happy linking. 🦕
+### 🔧 What didn't
+
+Everything that links. Your keywords, aliases, the `;;` search, URL linking, periodic relink — all untouched and exactly as fast as yesterday.
+
+Happy linking. 🦕
