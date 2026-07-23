@@ -1,25 +1,9 @@
-## 🦕 Summon the search
+## 🦕 The search gets right of way
 
-Auto-linking is instant — and that's exactly why some notes were out of reach. Type `Eibel - IT Termin` and `[[Eibel]]` lands the moment the first word ends; the full name never gets its turn. 3.7.0 adds a way to ask for exactly the note you mean.
+Quick fix for a rough edge in yesterday's note search: the auto-linker was linking words *inside* your search.
 
-### 🔎 The note search popup
+Typing `;;Eibel - IT` used to fall apart at the first space — the auto-linker saw a finished word, turned it into `[[Eibel]]` mid-search, and the popup vanished with the `;;` left behind.
 
-Type `;;` and the familiar popup floats in beside your cursor — now listing everything linkable in your vault (note names, keywords, frontmatter aliases) and filtering as you type. Spaces welcome:
+Now an active search owns its query. While you're typing after `;;`, the auto-linker stays quiet — spaces, separators and all — and the popup keeps filtering until you pick a note, press Esc, or move on. `;;Eibel - IT` → **Enter** → `[[Eibel - IT Termin]]`, exactly as intended.
 
-```
-;;Eibel - I▌
-┌────────────────────────┐
-│ 🔗 Eibel - IT Termin   │
-└────────────────────────┘
-```
-
-**Enter**, **Tab**, or a click swaps the whole search — trigger included — for `[[Eibel - IT Termin]]`. Mappings behave like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
-
-The details:
-
-- **The trigger is yours.** `;;` by default, changeable in the settings — even to `*`, if that's where your fingers go.
-- **It only fires on purpose.** Mid-word, doubled up, or followed by a space, the trigger stays plain text — bullet lists and bold stay popup-free.
-- **Same manners as always.** No popup in code blocks or inside links, Esc dismisses without a trace, and the Enter/Tab accept toggles apply here too.
-- **On by default**, with its own switch: *Settings → Note search popup*.
-
-Happy linking. 🦕
+Nothing else changed. Happy linking. 🦕
