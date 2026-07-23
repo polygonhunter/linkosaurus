@@ -37,6 +37,8 @@ interface AutoLinkSettings {
 	aliasSuggestEnabled: boolean;
 	aliasSuggestEnterAccepts: boolean;
 	aliasSuggestTabAccepts: boolean;
+	noteSearchEnabled: boolean;
+	noteSearchTrigger: string;
 	urlAutolinkEnabled: boolean;
 	urlAutolinkTlds: string;
 }
@@ -57,6 +59,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	aliasSuggestEnabled: true,
 	aliasSuggestEnterAccepts: true,
 	aliasSuggestTabAccepts: true,
+	noteSearchEnabled: true,
+	noteSearchTrigger: ";;",
 	urlAutolinkEnabled: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
@@ -1755,11 +1759,43 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return { start: firstIdx, displayText, query };
 	}
 
+	// Finds a note-search trigger (default ";;") in the typed text. The query
+	// may contain spaces so multi-part names like "Eibel - IT Termin" stay
+	// reachable; a query that starts with whitespace is ordinary text (with the
+	// trigger set to "*", list bullets must never open the popup).
+	private matchNoteSearchPrefix(
+		textBefore: string
+	): { start: number; query: string } | null {
+		const trigger = this.settings.noteSearchTrigger;
+		if (!trigger) return null;
+		const idx = textBefore.lastIndexOf(trigger);
+		if (idx === -1) return null;
+		const before = idx > 0 ? textBefore.charAt(idx - 1) : "";
+		if (/[\p{L}\p{N}]/u.test(before)) return null;
+		if (before === trigger.charAt(0)) return null;
+
+		const query = textBefore.substring(idx + trigger.length);
+		if (/^\s/.test(query)) return null;
+		if (query.includes("[[")) return null;
+		if (query.length > 60) return null;
+
+		return { start: idx, query };
+	}
+
 	getAliasSuggestTrigger(
 		cursor: EditorPosition,
 		editor: Editor
-	): (EditorSuggestTriggerInfo & { displayText: string }) | null {
-		if (!this.settings.aliasSuggestEnabled) return null;
+	):
+		| (EditorSuggestTriggerInfo & {
+				displayText: string;
+				mode: SuggestMode;
+		  })
+		| null {
+		if (
+			!this.settings.aliasSuggestEnabled &&
+			!this.settings.noteSearchEnabled
+		)
+			return null;
 
 		const line = editor.getLine(cursor.line);
 		const textBefore = line.substring(0, cursor.ch);
@@ -1781,15 +1817,31 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		)
 			return null;
 
-		const prefix = this.matchAliasPrefix(textBefore);
-		if (!prefix) return null;
+		if (this.settings.aliasSuggestEnabled) {
+			const prefix = this.matchAliasPrefix(textBefore);
+			if (prefix)
+				return {
+					start: { line: cursor.line, ch: prefix.start },
+					end: cursor,
+					query: prefix.query,
+					displayText: prefix.displayText,
+					mode: "alias",
+				};
+		}
 
-		return {
-			start: { line: cursor.line, ch: prefix.start },
-			end: cursor,
-			query: prefix.query,
-			displayText: prefix.displayText,
-		};
+		if (this.settings.noteSearchEnabled) {
+			const search = this.matchNoteSearchPrefix(textBefore);
+			if (search)
+				return {
+					start: { line: cursor.line, ch: search.start },
+					end: cursor,
+					query: search.query,
+					displayText: "",
+					mode: "search",
+				};
+		}
+
+		return null;
 	}
 
 	getAliasSuggestions(
@@ -1819,15 +1871,29 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return scored;
 	}
 
+	// displayText null means note-search mode: the typed query was only a
+	// filter and is replaced entirely, mirroring the keyword-autolink format
+	// (mapping entries keep their keyword as alias).
 	applyAliasSuggestion(
 		context: EditorSuggestContext,
 		entry: KeywordEntry,
-		displayText: string
+		displayText: string | null
 	) {
 		const t = sanitize(entry.target);
-		const d = sanitize(displayText);
-		if (!t || !d) return;
-		const insert = `[[${t}|${d}]]`;
+		if (!t) return;
+		let insert: string;
+		if (displayText === null) {
+			const kw = sanitize(entry.keyword);
+			if (!kw) return;
+			insert =
+				kw.toLowerCase() === t.toLowerCase()
+					? `[[${t}]]`
+					: `[[${t}|${kw}]]`;
+		} else {
+			const d = sanitize(displayText);
+			if (!d) return;
+			insert = `[[${t}|${d}]]`;
+		}
 
 		const editor = context.editor;
 		const view = (editor as unknown as { cm?: EditorView }).cm;
@@ -2011,6 +2077,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.aliasSuggestEnterAccepts = DEFAULT_SETTINGS.aliasSuggestEnterAccepts;
 		if (typeof this.settings.aliasSuggestTabAccepts !== "boolean")
 			this.settings.aliasSuggestTabAccepts = DEFAULT_SETTINGS.aliasSuggestTabAccepts;
+		if (typeof this.settings.noteSearchEnabled !== "boolean")
+			this.settings.noteSearchEnabled = DEFAULT_SETTINGS.noteSearchEnabled;
+		if (typeof this.settings.noteSearchTrigger !== "string" || !this.settings.noteSearchTrigger)
+			this.settings.noteSearchTrigger = DEFAULT_SETTINGS.noteSearchTrigger;
 		if (typeof this.settings.urlAutolinkEnabled !== "boolean")
 			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
 		if (typeof this.settings.urlAutolinkTlds !== "string")
@@ -2033,9 +2103,12 @@ interface AliasSuggestion {
 	match: SearchResult | null;
 }
 
+type SuggestMode = "alias" | "search";
+
 class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 	private plugin: AutoLinkKeywordsPlugin;
 	private displayText = "";
+	private mode: SuggestMode = "alias";
 	private pill: HTMLElement | null = null;
 	private pillObserver: MutationObserver | null = null;
 	visible = false;
@@ -2101,6 +2174,7 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 		const trigger = this.plugin.getAliasSuggestTrigger(cursor, editor);
 		if (!trigger) return null;
 		this.displayText = trigger.displayText;
+		this.mode = trigger.mode;
 		return trigger;
 	}
 
@@ -2142,7 +2216,7 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 		this.plugin.applyAliasSuggestion(
 			context,
 			suggestion.entry,
-			this.displayText
+			this.mode === "search" ? null : this.displayText
 		);
 		this.close();
 	}
@@ -2309,6 +2383,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						if (!value) return "The delimiter cannot be empty.";
 						if (value === plugin.settings.multiWordDelimiter)
 							return "Single-word and multi-word delimiters must be different.";
+						if (value === plugin.settings.noteSearchTrigger)
+							return "The delimiter must differ from the search trigger.";
 						return;
 					},
 				},
@@ -2328,6 +2404,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						if (!value) return "The delimiter cannot be empty.";
 						if (value === plugin.settings.singleWordDelimiter)
 							return "Single-word and multi-word delimiters must be different.";
+						if (value === plugin.settings.noteSearchTrigger)
+							return "The delimiter must differ from the search trigger.";
 						return;
 					},
 				},
@@ -2346,12 +2424,48 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				},
 			},
 			{
+				name: "Note search popup",
+				desc:
+					"Type the search trigger to open a popup listing every " +
+					"linkable note and keyword, filtering as you type — " +
+					"spaces allowed. Example: ;;Eib → [[Eibel - IT Termin]]",
+				aliases: ["search", "quick", "popup"],
+				control: {
+					type: "toggle",
+					key: "noteSearchEnabled",
+					defaultValue: DEFAULT_SETTINGS.noteSearchEnabled,
+				},
+			},
+			{
+				name: "Search trigger",
+				desc: "Characters that open the note search popup.",
+				aliases: ["search", "trigger"],
+				visible: () => plugin.settings.noteSearchEnabled,
+				control: {
+					type: "text",
+					key: "noteSearchTrigger",
+					defaultValue: DEFAULT_SETTINGS.noteSearchTrigger,
+					placeholder: ";;",
+					validate: (value: string) => {
+						if (!value) return "The trigger cannot be empty.";
+						if (
+							value === plugin.settings.singleWordDelimiter ||
+							value === plugin.settings.multiWordDelimiter
+						)
+							return "The trigger must differ from the alias delimiters.";
+						return;
+					},
+				},
+			},
+			{
 				name: "Accept suggestion with Enter",
 				desc:
 					"Pressing Enter links the highlighted suggestion. Turn off " +
 					"to keep Enter for line breaks even while the popup is open.",
 				aliases: ["enter", "keybinding"],
-				visible: () => plugin.settings.aliasSuggestEnabled,
+				visible: () =>
+					plugin.settings.aliasSuggestEnabled ||
+					plugin.settings.noteSearchEnabled,
 				control: {
 					type: "toggle",
 					key: "aliasSuggestEnterAccepts",
@@ -2362,7 +2476,9 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				name: "Accept suggestion with Tab",
 				desc: "Pressing Tab links the highlighted suggestion.",
 				aliases: ["tab", "keybinding"],
-				visible: () => plugin.settings.aliasSuggestEnabled,
+				visible: () =>
+					plugin.settings.aliasSuggestEnabled ||
+					plugin.settings.noteSearchEnabled,
 				control: {
 					type: "toggle",
 					key: "aliasSuggestTabAccepts",

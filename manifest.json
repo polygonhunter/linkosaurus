@@ -1,9 +1,9 @@
 {
 	"id": "autolink-keywords",
 	"name": "Linkosaurus",
-	"version": "3.6.0",
+	"version": "3.7.0",
 	"minAppVersion": "0.15.0",
-	"description": "Automatically links keywords to notes and turns URLs into Markdown links as you type, paste, or dictate. Includes autocomplete for inline aliases.",
+	"description": "Automatically links keywords to notes and turns URLs into Markdown links as you type, paste, or dictate. Includes alias autocomplete and a quick note-search popup.",
 	"author": "polygonhunter",
 	"isDesktopOnly": false
 }
