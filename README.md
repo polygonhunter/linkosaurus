@@ -24,7 +24,7 @@ Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin y
 | `ML ` | `[[Machine Learning\|ML]] ` |
 | `Berlin.` | `[[Berlin]].` |
 | `(Paris)` | `([[Paris]])` |
-| `Eibel - Facebook ` | `[[Eibel]] - [[Facebook]] ` |
+| `T-Rex - Facebook ` | `[[T-Rex]] - [[Facebook]] ` |
 | `trip//Tokyo ` | `[[Tokyo\|trip]] ` |
 | `///cherry blossoms///Tokyo ` | `[[Tokyo\|cherry blossoms]] ` |
 | `youtube.com ` | `[youtube.com](https://youtube.com) ` |
@@ -32,7 +32,7 @@ Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin y
 
 And while you're writing an inline alias, an autocomplete popup floats in beside the cursor and suggests the target as you type — **Enter** or **Tab** drops the finished link. On by default, one switch turns it off.
 
-Need a note the auto-linker can't reach — say `Eibel - IT Termin`, where `Eibel` links before the full name has a chance? Type `;;` and the same popup becomes a search across everything linkable in your vault. Pick the note, and `[[Eibel - IT Termin]]` lands whole.
+Need a note the auto-linker can't reach — say `T-Rex - Feeding Schedule`, where `T-Rex` links before the full name has a chance? Type `;;` and the same popup becomes a search across everything linkable in your vault. Pick the note, and `[[T-Rex - Feeding Schedule]]` lands whole.
 
 ## Features
 
@@ -42,7 +42,7 @@ This is the heart of the plugin. Linkosaurus watches the word (or words) you jus
 
 ### Names and separators stay intact
 
-If you keep sub-notes like `Eibel - Instagram` and `Eibel - Facebook` alongside a main `Eibel` note, Linkosaurus links each piece on its own: typing `Eibel - Facebook` gives you `[[Eibel]] - [[Facebook]]`. The person stays linked, the platform gets its own link, and the separator is left alone.
+If you keep sub-notes like `T-Rex - Instagram` and `T-Rex - Facebook` alongside a main `T-Rex` note (your T-Rex has social media, no judgement), Linkosaurus links each piece on its own: typing `T-Rex - Facebook` gives you `[[T-Rex]] - [[Facebook]]`. The dinosaur keeps its link, the platform gets its own, and the separator is left alone.
 
 ### Multi-word keywords with smart undo
 
@@ -79,31 +79,33 @@ The target on the right must exist in your keyword list, and both delimiters are
 You don't have to remember the target's exact name. The moment you start typing the target part of an alias, a small panel floats in beside the cursor with matching suggestions — fuzzy-matched from your note names, keywords, and frontmatter aliases:
 
 ```
-Urlaub//B▌
+trip//T▌
 ┌──────────────────┐
-│ 🔗 Berlin        │
-│ 🔗 Bielefeld     │
+│ 🔗 Tokyo         │
+│ 🔗 T-Rex         │
 └──────────────────┘
 ```
 
-Arrow keys to choose, **Enter** or **Tab** to link — `[[Berlin|Urlaub]]` lands fully formed, no trailing space needed. Keep typing to narrow the list (`Bln` still finds Berlin), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you.
+Arrow keys to choose, **Enter** or **Tab** to link — `[[Tokyo|trip]]` lands fully formed, no trailing space needed. (Choose wisely; a trip to the T-Rex is a very different itinerary.) Keep typing to narrow the list (`Tky` still finds Tokyo), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you.
 
 The whole thing is **on by default** and lives behind a single switch — *Settings → Alias target suggestions* — if you'd rather write without it. Both accept keys have their own toggle on top: turn Enter off to keep it for line breaks and link with Tab alone, or the other way around.
 
 ### Quick link search
 
-Auto-linking fires the moment a word ends — which means a note like `Eibel - IT Termin` is unreachable by typing alone: `Eibel` links first, and the rest of the name never gets its turn. For those, summon the search. Type `;;` and the popup appears again, now listing *everything* linkable in your vault — note names, keywords, frontmatter aliases — and filtering as you type. Spaces are fine:
+Auto-linking fires the moment a word ends — which means a note like `T-Rex - Feeding Schedule` is unreachable by typing alone: `T-Rex` links first, and the rest of the name never gets its turn. For those, summon the search. Type `;;` and the popup appears again, now listing *everything* linkable in your vault — note names, keywords, frontmatter aliases — and filtering as you type. Spaces are fine:
 
 ```
-;;Eibel - I▌
-┌────────────────────────┐
-│ 🔗 Eibel - IT Termin   │
-└────────────────────────┘
+;;T-Rex - F▌
+┌──────────────────────────────┐
+│ 🔗 T-Rex - Feeding Schedule  │
+└──────────────────────────────┘
 ```
 
-**Enter**, **Tab**, or a click replaces the whole search — trigger and all — with `[[Eibel - IT Termin]]`. Mappings behave exactly like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
+**Enter**, **Tab**, or a click replaces the whole search — trigger and all — with `[[T-Rex - Feeding Schedule]]`. Too lazy to type the full name? `;;feed` gets you there too — it's fuzzy. Mappings behave exactly like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
 
 The search only starts when you mean it: the trigger does nothing mid-word, doubled up, or followed by a space — so if you change it to `*` (it's configurable in the settings), your bullet lists and bold text stay popup-free. It shares the Enter/Tab accept toggles with the alias autocomplete, and its own switch — *Settings → Note search popup* — turns it off entirely.
+
+### It learns your vault automatically
 
 With vault scanning on (the default), every note name becomes a keyword the moment the note exists — create `Project Aurora.md` and it's instantly auto-linkable everywhere. Linkosaurus also picks up wikilinks pointing at notes you *haven't written yet*, so you can link forward and let the notes catch up later.
 
@@ -185,6 +187,8 @@ Linkosaurus ships with more knobs than most people will ever need — I tried to
 | **Single-word alias delimiter** | Inline alias delimiter for single-word display text (default `//`) |
 | **Multi-word alias delimiter** | Inline alias delimiter for multi-word display text (default `///`) |
 | **Alias target suggestions** | Autocomplete popup for the target part of an alias (on by default) |
+| **Note search popup** | The `;;` quick search across everything linkable (on by default) |
+| **Search trigger** | Characters that open the note search (default `;;`) |
 | **Accept suggestion with Enter** | Enter links the highlighted suggestion (on by default) |
 | **Accept suggestion with Tab** | Tab links the highlighted suggestion (on by default) |
 | **Auto-detect vault links** | Use every note name in the vault as a keyword |

@@ -419,7 +419,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (/^\s+$/.test(text)) return false;
 			// A keyword only grows into a longer one across word characters
 			// (e.g. "Open" → "Open Source"). Any non-word character — sentence
-			// punctuation or a separator like "-" in "Eibel - Facebook" — ends
+			// punctuation or a separator like "-" in "T-Rex - Facebook" — ends
 			// the current keyword, so keep the link that was already created
 			// instead of undoing it.
 			if (!/[\p{L}\p{N}]/u.test(text)) {
@@ -1769,9 +1769,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	}
 
 	// Finds a note-search trigger (default ";;") in the typed text. The query
-	// may contain spaces so multi-part names like "Eibel - IT Termin" stay
-	// reachable; a query that starts with whitespace is ordinary text (with the
-	// trigger set to "*", list bullets must never open the popup).
+	// may contain spaces so multi-part names like "T-Rex - Feeding Schedule"
+	// stay reachable; a query that starts with whitespace is ordinary text
+	// (with the trigger set to "*", list bullets must never open the popup).
 	private matchNoteSearchPrefix(
 		textBefore: string
 	): { start: number; query: string } | null {
@@ -2437,7 +2437,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				desc:
 					"Type the search trigger to open a popup listing every " +
 					"linkable note and keyword, filtering as you type — " +
-					"spaces allowed. Example: ;;Eib → [[Eibel - IT Termin]]",
+					"spaces allowed. Example: ;;feed → [[T-Rex - Feeding Schedule]]",
 				aliases: ["search", "quick", "popup"],
 				control: {
 					type: "toggle",
