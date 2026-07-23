@@ -536,6 +536,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (!textBefore.length) return false;
 		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
 		if (this.isInsideWikilink(textBefore)) return false;
+		// An active note search owns its query: spaces and punctuation are
+		// part of what the user is filtering for, so the auto-linker must not
+		// grab words out of it (it would inject [[..]] into the query and
+		// kill the popup). The search resolves via the popup instead.
+		if (
+			this.settings.noteSearchEnabled &&
+			this.matchNoteSearchPrefix(textBefore)
+		)
+			return false;
 
 		const urlMatch = this.matchUrlAtEnd(textBefore);
 		if (urlMatch) {
