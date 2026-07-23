@@ -32,6 +32,8 @@ Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin y
 
 And while you're writing an inline alias, an autocomplete popup floats in beside the cursor and suggests the target as you type — **Enter** or **Tab** drops the finished link. On by default, one switch turns it off.
 
+Need a note the auto-linker can't reach — say `Eibel - IT Termin`, where `Eibel` links before the full name has a chance? Type `;;` and the same popup becomes a search across everything linkable in your vault. Pick the note, and `[[Eibel - IT Termin]]` lands whole.
+
 ## Features
 
 ### Auto-link while you type
@@ -88,7 +90,20 @@ Arrow keys to choose, **Enter** or **Tab** to link — `[[Berlin|Urlaub]]` lands
 
 The whole thing is **on by default** and lives behind a single switch — *Settings → Alias target suggestions* — if you'd rather write without it. Both accept keys have their own toggle on top: turn Enter off to keep it for line breaks and link with Tab alone, or the other way around.
 
-### It learns your vault automatically
+### Quick link search
+
+Auto-linking fires the moment a word ends — which means a note like `Eibel - IT Termin` is unreachable by typing alone: `Eibel` links first, and the rest of the name never gets its turn. For those, summon the search. Type `;;` and the popup appears again, now listing *everything* linkable in your vault — note names, keywords, frontmatter aliases — and filtering as you type. Spaces are fine:
+
+```
+;;Eibel - I▌
+┌────────────────────────┐
+│ 🔗 Eibel - IT Termin   │
+└────────────────────────┘
+```
+
+**Enter**, **Tab**, or a click replaces the whole search — trigger and all — with `[[Eibel - IT Termin]]`. Mappings behave exactly like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
+
+The search only starts when you mean it: the trigger does nothing mid-word, doubled up, or followed by a space — so if you change it to `*` (it's configurable in the settings), your bullet lists and bold text stay popup-free. It shares the Enter/Tab accept toggles with the alias autocomplete, and its own switch — *Settings → Note search popup* — turns it off entirely.
 
 With vault scanning on (the default), every note name becomes a keyword the moment the note exists — create `Project Aurora.md` and it's instantly auto-linkable everywhere. Linkosaurus also picks up wikilinks pointing at notes you *haven't written yet*, so you can link forward and let the notes catch up later.
 

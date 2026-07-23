@@ -1,14 +1,25 @@
-## 🦕 Take the Tab
+## 🦕 Summon the search
 
-Small release, big quality-of-life: the alias autocomplete now listens to **Tab**.
+Auto-linking is instant — and that's exactly why some notes were out of reach. Type `Eibel - IT Termin` and `[[Eibel]]` lands the moment the first word ends; the full name never gets its turn. 3.7.0 adds a way to ask for exactly the note you mean.
 
-### ⌨️ Choose your accept key
+### 🔎 The note search popup
 
-Both accept keys have their own switch in the settings — mix and match:
+Type `;;` and the familiar popup floats in beside your cursor — now listing everything linkable in your vault (note names, keywords, frontmatter aliases) and filtering as you type. Spaces welcome:
 
-- **Accept suggestion with Enter** — the classic. Turn it off if you'd rather keep Enter for line breaks even while the popup is open.
-- **Accept suggestion with Tab** — the IDE feel. On by default.
+```
+;;Eibel - I▌
+┌────────────────────────┐
+│ 🔗 Eibel - IT Termin   │
+└────────────────────────┘
+```
 
-The popup's footer hints adjust to whatever combination you pick, and Esc still dismisses without a trace. If you turn Enter acceptance off, pressing Enter with the popup open simply breaks the line — and a fully typed alias still links on its way out, exactly like before the popup existed.
+**Enter**, **Tab**, or a click swaps the whole search — trigger included — for `[[Eibel - IT Termin]]`. Mappings behave like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
+
+The details:
+
+- **The trigger is yours.** `;;` by default, changeable in the settings — even to `*`, if that's where your fingers go.
+- **It only fires on purpose.** Mid-word, doubled up, or followed by a space, the trigger stays plain text — bullet lists and bold stay popup-free.
+- **Same manners as always.** No popup in code blocks or inside links, Esc dismisses without a trace, and the Enter/Tab accept toggles apply here too.
+- **On by default**, with its own switch: *Settings → Note search popup*.
 
 Happy linking. 🦕
