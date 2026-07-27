@@ -1,15 +1,9 @@
-## 🦕 4.0 — A fresh coat of feathers
+## 🦕 New front page
 
-No new buttons, no new bugs — 4.0 is all about the words. The entire documentation got a ground-up rewrite: cleaner, funnier, and with simple examples any vault can relate to.
+The README got a glow-up — same plugin, better first impression.
 
-### 📖 What changed
+- **Features first.** The good stuff now opens the page: auto-linking, the `//` aliases with their autocomplete popup, the `;;` vault search, and URL linking — each with an example you can grasp in three seconds.
+- **Badges on the door.** Release, downloads, and license at a glance.
+- **Sharper description.** The one-liner in the plugin manifest now says what Linkosaurus actually does, faster.
 
-- **The README reads like it should** — every feature explained with crisp, generic examples (the resident T-Rex now handles the demos, and yes, he has a Facebook page).
-- **Settings descriptions polished** — same options, clearer words.
-- **Release notes archive tidied up** — older release texts were refreshed to match the new examples.
-
-### 🔧 What didn't
-
-Everything that links. Your keywords, aliases, the `;;` search, URL linking, periodic relink — all untouched and exactly as fast as yesterday.
-
-Happy linking. 🦕
+No code changes — if it linked yesterday, it links today. Happy linking. 🦕

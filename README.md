@@ -8,15 +8,26 @@
 
 **Your vault links itself.**
 
+<a href="https://github.com/polygonhunter/linkosaurus/releases/latest"><img src="https://img.shields.io/github/v/release/polygonhunter/linkosaurus?label=latest&color=7c3aed" alt="Latest release"></a>
+<a href="https://github.com/polygonhunter/linkosaurus/releases"><img src="https://img.shields.io/github/downloads/polygonhunter/linkosaurus/total?color=2ea44f" alt="Downloads"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/polygonhunter/linkosaurus?color=blue" alt="License"></a>
+
 </div>
 
-Linkosaurus turns plain text into wikilinks *as you type*. Write a keyword, press Space — and the link is already there. No reaching for `[[`, no autocomplete popup to fight, no breaking your train of thought. You just write, and your notes quietly weave themselves together.
+Stop typing `[[`. Write a word, press Space — the wikilink is already there.
 
-I built Linkosaurus because I wanted linking to disappear as a task. In a good vault the connections between notes are the whole point — but stopping to type brackets, wait for a suggestion list, and pick the right entry pulls me out of writing every single time. So I made a plugin that does it in the background: it watches for the note names, aliases, and keywords you already care about, and links them the moment you finish a word. It works on desktop and mobile, and it runs entirely offline.
+```
+You type:            Tokyo and back.
+Your note says:      [[Tokyo]] and back.
+```
 
-Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin you forget is running until you notice your notes are all connected. If something feels off or you have an idea, [open an issue on GitHub](https://github.com/polygonhunter/linkosaurus/issues); I read everything.
+Works on desktop and mobile. Runs entirely offline. Zero setup: install, write, watch your vault connect itself.
 
-## What it looks like
+## Why Linkosaurus?
+
+### ⚡ Type. Space. Linked.
+
+Linkosaurus watches the words you finish and links them the instant you hit **Space**, **Enter**, or punctuation — `)` `.` `,` `!` `?` `:` `;`. You never stop writing.
 
 | You type | Linkosaurus writes |
 |----------|--------------------|
@@ -25,24 +36,64 @@ Linkosaurus keeps growing, but it's meant to stay small and quiet — a plugin y
 | `Berlin.` | `[[Berlin]].` |
 | `(Paris)` | `([[Paris]])` |
 | `T-Rex - Facebook ` | `[[T-Rex]] - [[Facebook]] ` |
-| `trip//Tokyo ` | `[[Tokyo\|trip]] ` |
-| `///cherry blossoms///Tokyo ` | `[[Tokyo\|cherry blossoms]] ` |
-| `youtube.com ` | `[youtube.com](https://youtube.com) ` |
-| `https://www.example.com/blog ` | `[example.com/blog](https://www.example.com/blog) ` |
 
-And while you're writing an inline alias, an autocomplete popup floats in beside the cursor and suggests the target as you type — **Enter** or **Tab** drops the finished link. On by default, one switch turns it off.
+### ✨ Aliases that finish themselves
 
-Need a note the auto-linker can't reach — say `T-Rex - Feeding Schedule`, where `T-Rex` links before the full name has a chance? Type `;;` and the same popup becomes a search across everything linkable in your vault. Pick the note, and `[[T-Rex - Feeding Schedule]]` lands whole.
+The word on the page isn't the note's name? Slip in an alias without breaking flow — `//` for one word, `///` for phrases:
 
-## Features
+```
+trip//Tokyo                   →  [[Tokyo|trip]]
+///cherry blossoms///Tokyo    →  [[Tokyo|cherry blossoms]]
+```
 
-### Auto-link while you type
+And you don't even have to remember the note's name. Start typing the target and a popup floats in beside your cursor, fuzzy-matched from your note names, keywords, and frontmatter aliases:
 
-This is the heart of the plugin. Linkosaurus watches the word (or words) you just finished and, the instant you press **Space**, **Enter**, or common punctuation — `)` `.` `,` `!` `?` `:` `;` — it replaces a match with the right wikilink. You never stop writing.
+```
+trip//T▌
+┌──────────────────┐
+│ 🔗 Tokyo         │
+│ 🔗 T-Rex         │
+└──────────────────┘
+```
 
-### Names and separators stay intact
+**Enter** or **Tab** drops the finished link — `[[Tokyo|trip]]`, fully formed. (Choose wisely; a trip to the T-Rex is a very different itinerary.)
 
-If you keep sub-notes like `T-Rex - Instagram` and `T-Rex - Facebook` alongside a main `T-Rex` note (your T-Rex has social media, no judgement), Linkosaurus links each piece on its own: typing `T-Rex - Facebook` gives you `[[T-Rex]] - [[Facebook]]`. The dinosaur keeps its link, the platform gets its own, and the separator is left alone.
+### 🔎 Search your vault mid-sentence
+
+Some notes can't be reached by typing alone — `T-Rex - Feeding Schedule` never gets a chance, because `T-Rex` links first. So summon the search: type `;;` and the popup lists *everything* linkable in your vault, filtering as you type. Spaces are fine:
+
+```
+;;T-Rex - F▌
+┌──────────────────────────────┐
+│ 🔗 T-Rex - Feeding Schedule  │
+└──────────────────────────────┘
+```
+
+One keypress replaces the whole search — trigger and all — with `[[T-Rex - Feeding Schedule]]`. Too lazy to type the full name? `;;feed` gets you there too. It's fuzzy.
+
+### 🌐 URLs tidy themselves
+
+Plain web addresses become clean Markdown links on their own:
+
+| You type | Linkosaurus writes |
+|----------|--------------------|
+| `https://www.github.com` | `[github.com](https://www.github.com)` |
+| `github.com` | `[github.com](https://github.com)` |
+| `https://shop.example.com/p?id=1` | `[shop.example.com/p](https://shop.example.com/p?id=1)` |
+
+### 🧠 And it thinks ahead
+
+- **Smart undo** — with `Open` and `Open Source` in your list, typing `Open S…` quietly unlinks `[[Open]]` and waits for the longer match. You always get the most specific link.
+- **Separators stay intact** — `T-Rex - Facebook` → `[[T-Rex]] - [[Facebook]]`. The dinosaur keeps its link, the platform gets its own (your T-Rex has social media, no judgement).
+- **It learns your vault** — every note name becomes linkable the moment the note exists; frontmatter `aliases:` too.
+- **Paste & dictation** — pasted or dictated text arrives pre-linked in a single pass.
+- **Periodic auto-relink** — optionally re-scan your vault on a schedule so old notes catch up with new keywords.
+- **Bulk commands** — link a whole note or the whole vault in one go.
+- **Private by design** — everything runs on your device. No network requests, ever.
+
+---
+
+## The details
 
 ### Multi-word keywords with smart undo
 
@@ -54,60 +105,19 @@ With both `Open` and `Open Source` in your list:
 2. You type `S` → Linkosaurus realises `Open S…` might become `Open Source`, quietly undoes the link → `Open S`
 3. You type `ource ` → `[[Open Source]]`
 
-If your next character *can't* continue the longer term (`Open H…`), the original `[[Open]]` link simply stays. You always end up with the most specific link, and you never have to think about it.
+If your next character *can't* continue the longer term (`Open H…`), the original `[[Open]]` link simply stays. You never have to think about it.
 
-### Inline aliases
+### Alias autocomplete, in full
 
-Sometimes the word on the page isn't the note's name. Add display text without breaking flow:
+The suggestion popup only appears inside the alias syntax (`//` and `///`, including custom delimiters) — normal typing stays popup-free. Keep typing to narrow the list (`Tky` still finds Tokyo), press Esc to dismiss without a trace, or finish the alias by hand; the popup never picks for you. Both accept keys have their own toggle: turn Enter off to keep it for line breaks and link with Tab alone, or the other way around.
 
-**Single-word** (default delimiter `//`):
+### The `;;` search, in full
 
-```
-trip//Tokyo  →  [[Tokyo|trip]]
-```
+The search only starts when you mean it: the trigger does nothing mid-word, doubled up, or followed by a space — so if you change it to `*` (it's configurable), your bullet lists and bold text stay popup-free. While a search is active the auto-linker stays out of its way, and Esc always dismisses cleanly. Mappings behave exactly like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
 
-**Multi-word** (default delimiter `///`):
+### URL linking, in full
 
-```
-///cherry blossoms///Tokyo  →  [[Tokyo|cherry blossoms]]
-```
-
-The target on the right must exist in your keyword list, and both delimiters are configurable.
-
-### Alias autocomplete
-
-You don't have to remember the target's exact name. The moment you start typing the target part of an alias, a small panel floats in beside the cursor with matching suggestions — fuzzy-matched from your note names, keywords, and frontmatter aliases:
-
-```
-trip//T▌
-┌──────────────────┐
-│ 🔗 Tokyo         │
-│ 🔗 T-Rex         │
-└──────────────────┘
-```
-
-Arrow keys to choose, **Enter** or **Tab** to link — `[[Tokyo|trip]]` lands fully formed, no trailing space needed. (Choose wisely; a trip to the T-Rex is a very different itinerary.) Keep typing to narrow the list (`Tky` still finds Tokyo), or press Esc and finish the alias by hand; the classic flow is untouched, and the popup never picks for you.
-
-The whole thing is **on by default** and lives behind a single switch — *Settings → Alias target suggestions* — if you'd rather write without it. Both accept keys have their own toggle on top: turn Enter off to keep it for line breaks and link with Tab alone, or the other way around.
-
-### Quick link search
-
-Auto-linking fires the moment a word ends — which means a note like `T-Rex - Feeding Schedule` is unreachable by typing alone: `T-Rex` links first, and the rest of the name never gets its turn. For those, summon the search. Type `;;` and the popup appears again, now listing *everything* linkable in your vault — note names, keywords, frontmatter aliases — and filtering as you type. Spaces are fine:
-
-```
-;;T-Rex - F▌
-┌──────────────────────────────┐
-│ 🔗 T-Rex - Feeding Schedule  │
-└──────────────────────────────┘
-```
-
-**Enter**, **Tab**, or a click replaces the whole search — trigger and all — with `[[T-Rex - Feeding Schedule]]`. Too lazy to type the full name? `;;feed` gets you there too — it's fuzzy. Mappings behave exactly like the auto-linker: picking `ML` inserts `[[Machine Learning|ML]]`.
-
-The search only starts when you mean it: the trigger does nothing mid-word, doubled up, or followed by a space — so if you change it to `*` (it's configurable in the settings), your bullet lists and bold text stay popup-free. It shares the Enter/Tab accept toggles with the alias autocomplete, and its own switch — *Settings → Note search popup* — turns it off entirely.
-
-### It learns your vault automatically
-
-With vault scanning on (the default), every note name becomes a keyword the moment the note exists — create `Project Aurora.md` and it's instantly auto-linkable everywhere. Linkosaurus also picks up wikilinks pointing at notes you *haven't written yet*, so you can link forward and let the notes catch up later.
+The display text strips the protocol, `www.`, query string, fragment, and trailing slash; the link target keeps the full URL. Bare domains are only linked when their top-level domain is in your allowlist (defaults: `de com org net io shop app dev` — editable). Toggleable.
 
 ### Frontmatter aliases
 
@@ -116,23 +126,6 @@ Linkosaurus reads the `aliases:` field from your YAML frontmatter. If `Tokyo.md`
 ### Case-insensitive matching
 
 `tokyo`, `Tokyo`, and `TOKYO` all resolve to the same note. Toggleable.
-
-### Paste and dictation
-
-Text you paste or dictate is scanned in a single pass — keywords and URLs alike are converted as it lands, so pasted paragraphs come in pre-linked.
-
-### Auto-link URLs
-
-Plain web addresses become tidy Markdown links on their own:
-
-| You type | Linkosaurus writes |
-|----------|--------------------|
-| `https://www.github.com` | `[github.com](https://www.github.com)` |
-| `github.com` | `[github.com](https://github.com)` |
-| `http://example.com/blog` | `[example.com/blog](http://example.com/blog)` |
-| `https://shop.example.com/p?id=1` | `[shop.example.com/p](https://shop.example.com/p?id=1)` |
-
-The display text strips the protocol, `www.`, query string, fragment, and trailing slash; the link target keeps the full URL. Bare domains are only linked when their top-level domain is in your allowlist (defaults: `de com org net io shop app dev` — editable). Toggleable.
 
 ### Periodic auto-relink
 
@@ -178,7 +171,7 @@ ML = Machine Learning
 
 ## Settings
 
-Linkosaurus ships with more knobs than most people will ever need — I tried to write a plain-language explanation for each one, so browse the settings tab and the option you're looking for is probably already there.
+Linkosaurus ships with more knobs than most people will ever need — every option has a plain-language explanation, so browse the settings tab and the thing you're looking for is probably already there.
 
 | Setting | Description |
 |---------|-------------|
@@ -204,7 +197,7 @@ Linkosaurus ships with more knobs than most people will ever need — I tried to
 
 ## Privacy
 
-I treat privacy as the default, not a feature. Linkosaurus runs **entirely on your device** — no notes, keywords, or URLs ever leave your vault, and the plugin makes no network requests of any kind. The only thing hosted anywhere is the open-source code, right here on GitHub.
+Privacy is the default, not a feature. Linkosaurus runs **entirely on your device** — no notes, keywords, or URLs ever leave your vault, and the plugin makes no network requests of any kind. The only thing hosted anywhere is the open-source code, right here on GitHub.
 
 ## Installation
 
@@ -222,6 +215,8 @@ I treat privacy as the default, not a feature. Linkosaurus runs **entirely on yo
 
 ## Feedback, questions, ideas
 
-Linkosaurus is a small, one-person project, built and maintained alongside everything else in life. If you hit a bug, want a feature, or just want to tell me how you use it, please [head over to GitHub](https://github.com/polygonhunter/linkosaurus/issues) — it genuinely helps, and it's what keeps the plugin moving.
+I built Linkosaurus because I wanted linking to disappear as a task — in a good vault the connections are the whole point, and stopping to type brackets pulls you out of writing every single time. It's a small, one-person project, meant to stay quiet and fast: a plugin you forget is running until you notice your notes are all connected.
+
+If you hit a bug, want a feature, or just want to tell me how you use it, [head over to GitHub](https://github.com/polygonhunter/linkosaurus/issues) — I read everything, and it's what keeps the plugin moving.
 
 Happy linking. 🦕
