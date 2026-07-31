@@ -16,7 +16,7 @@
 
 const MARK = /\p{M}/u;
 const MARK_G = /\p{M}/gu;
-const ASCII_ONLY = /^[\x00-\x7F]*$/;
+const ASCII_ONLY = /^\p{ASCII}*$/u;
 
 // Letters with no canonical decomposition: stripping combining marks does
 // nothing for these, so they are spelled out.

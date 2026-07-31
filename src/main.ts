@@ -3098,8 +3098,14 @@ class AutoLinkSettingTab extends PluginSettingTab {
 	}
 
 	// Fallback for Obsidian < 1.13; newer versions render from
-	// getSettingDefinitions() and never call this.
+	// getSettingDefinitions() and never call this. The body lives in
+	// renderLegacy() so the in-tab refreshes below don't have to call the
+	// deprecated display() themselves.
 	display() {
+		this.renderLegacy();
+	}
+
+	private renderLegacy() {
 		const { containerEl } = this;
 		containerEl.empty();
 
@@ -3147,7 +3153,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.foldDiacritics = value;
 						await this.plugin.saveSettings();
-						this.display();
+						this.renderLegacy();
 					});
 			});
 
@@ -3169,7 +3175,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 							this.plugin.settings.foldLanguageMode =
 								value === "selected" ? "selected" : "all";
 							await this.plugin.saveSettings();
-							this.display();
+							this.renderLegacy();
 						});
 				});
 
@@ -3264,7 +3270,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.aliasSuggestEnabled = value;
 						await this.plugin.saveSettings();
-						this.display();
+						this.renderLegacy();
 					});
 			});
 
@@ -3308,7 +3314,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.scanVaultLinks = value;
 						await this.plugin.saveSettings();
-						this.display();
+						this.renderLegacy();
 					});
 			});
 
@@ -3423,7 +3429,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 							} else {
 								this.plugin.stopPeriodicRelink();
 							}
-							this.display();
+							this.renderLegacy();
 						});
 				});
 
@@ -3463,7 +3469,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						.onChange(async (value) => {
 							this.plugin.settings.urlAutolinkEnabled = value;
 							await this.plugin.saveSettings();
-							this.display();
+							this.renderLegacy();
 						});
 				});
 
