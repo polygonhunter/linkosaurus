@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+	LEGACY_PROPERTY_FIELDS,
 	isLinkableProperty,
 	linkFrontmatter,
 	linkPropertyValue,
+	nextPropertyLinkAction,
 	parsePropertyList,
 	type PropertyMatcher,
 } from "../src/properties";
 
-const NOTES = ["Tokyo", "Ocean Service Group", "Machine Learning", "Łukasz Nowak"];
+const NOTES = ["Tokyo", "Museum of Natural History", "Machine Learning", "Łukasz Nowak"];
 const MAPPINGS = new Map([["ml", "Machine Learning"]]);
 
 function foldKey(text: string): string {
@@ -50,20 +52,23 @@ test("keeps the typed word as display text for mappings", () => {
 	);
 });
 
-test("resolves an unambiguous prefix — the Ocean case", () => {
+test("resolves an unambiguous prefix — the Museum case", () => {
 	// A prefix hit writes the full note name, like picking it from Obsidian's
 	// own [[ menu would.
 	assert.equal(
-		linkPropertyValue("Ocean", matcher()),
-		"[[Ocean Service Group]]"
+		linkPropertyValue("Museum", matcher()),
+		"[[Museum of Natural History]]"
 	);
 });
 
 test("refuses an ambiguous prefix", () => {
-	const twoOceans = matcher({
-		prefixCandidates: () => ["Ocean Service Group", "Ocean Freight"],
+	const twoMuseums = matcher({
+		prefixCandidates: () => [
+			"Museum of Natural History",
+			"Museum of Modern Art",
+		],
 	});
-	assert.equal(linkPropertyValue("Ocean", twoOceans), null);
+	assert.equal(linkPropertyValue("Museum", twoMuseums), null);
 });
 
 test("two notes differing only by accent are not a unique prefix", () => {
@@ -75,7 +80,7 @@ test("two notes differing only by accent are not a unique prefix", () => {
 
 test("prefix matching can be switched off", () => {
 	assert.equal(
-		linkPropertyValue("Ocean", matcher({ prefixMatchEnabled: false })),
+		linkPropertyValue("Museum", matcher({ prefixMatchEnabled: false })),
 		null
 	);
 });
@@ -133,6 +138,40 @@ test("an explicit list narrows which properties are touched", () => {
 	assert.ok(!isLinkableProperty("tags", ["tags"]));
 });
 
+test("waits while a property field still has focus, never drops the work", () => {
+	assert.equal(
+		nextPropertyLinkAction({ focusInProperties: true }),
+		"wait"
+	);
+	assert.equal(
+		nextPropertyLinkAction({ focusInProperties: false }),
+		"link"
+	);
+});
+
+test("an empty list means every property but the reserved ones", () => {
+	const allowed = parsePropertyList("");
+	assert.deepEqual(allowed, []);
+	assert.ok(isLinkableProperty("company", allowed));
+	assert.ok(isLinkableProperty("attendees", allowed));
+	assert.ok(!isLinkableProperty("tags", allowed));
+});
+
+test("the 4.3.0 default list is recognised for migration", () => {
+	assert.deepEqual(parsePropertyList(LEGACY_PROPERTY_FIELDS), [
+		"author",
+		"publisher",
+		"related",
+		"topic",
+		"people",
+		"project",
+	]);
+	// A vault using that list would have skipped ordinary property names.
+	assert.ok(
+		!isLinkableProperty("company", parsePropertyList(LEGACY_PROPERTY_FIELDS))
+	);
+});
+
 test("parses the settings list", () => {
 	assert.deepEqual(
 		parsePropertyList("author\n Publisher \n\nauthor\n"),
@@ -142,7 +181,7 @@ test("parses the settings list", () => {
 
 test("walks a whole frontmatter block", () => {
 	const fm = {
-		author: "Ocean",
+		author: "Museum",
 		publisher: "Tokyo",
 		status: "Some free text",
 		tags: "Tokyo",
@@ -151,7 +190,7 @@ test("walks a whole frontmatter block", () => {
 	};
 	const changes = linkFrontmatter(fm, [], matcher());
 
-	assert.equal(changes.get("author"), "[[Ocean Service Group]]");
+	assert.equal(changes.get("author"), "[[Museum of Natural History]]");
 	assert.equal(changes.get("publisher"), "[[Tokyo]]");
 	assert.deepEqual(changes.get("related"), [
 		"[[Tokyo]]",

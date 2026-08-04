@@ -40,7 +40,10 @@ import {
 	matchEmailInText,
 } from "./email";
 import {
+	LEGACY_PROPERTY_FIELDS,
+	isLinkableProperty,
 	linkFrontmatter,
+	nextPropertyLinkAction,
 	parsePropertyList,
 	type PropertyMatcher,
 } from "./properties";
@@ -98,8 +101,8 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	noteSearchTrigger: ";;",
 	urlAutolinkEnabled: true,
 	emailAutolinkEnabled: true,
-	propertyLinkEnabled: false,
-	propertyLinkFields: "author\npublisher\nrelated\ntopic\npeople\nproject",
+	propertyLinkEnabled: true,
+	propertyLinkFields: "",
 	propertyLinkOnEdit: true,
 	propertyLinkPrefixMatch: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
@@ -205,6 +208,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private relinkTimer: number | null = null;
 	private relinkDebounceTimer: number | null = null;
 	private propertyLinkTimers = new Map<string, number>();
+	private pendingPropertyLinks = new Map<string, TFile>();
+	private propertyFocusTimer: number | null = null;
 	// Files this plugin is currently writing to, so its own frontmatter edit
 	// does not come back through the metadata cache as new work.
 	private propertyLinkWrites = new Set<string>();
@@ -377,6 +382,24 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("delete", () => this.scheduleScan())
 		);
+		// Leaving the property panel is the moment a value is finished, and
+		// switching notes is the last chance to catch one.
+		this.registerDomEvent(document, "focusout", () => {
+			if (this.propertyFocusTimer !== null) {
+				window.clearTimeout(this.propertyFocusTimer);
+			}
+			// Tabbing between fields lands here too; the delay lets focus
+			// settle before deciding whether the panel was really left.
+			this.propertyFocusTimer = window.setTimeout(() => {
+				this.propertyFocusTimer = null;
+				this.flushPropertyLinks();
+			}, 150);
+		});
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", () =>
+				this.flushPropertyLinks()
+			)
+		);
 		this.registerEvent(
 			this.app.vault.on("rename", () => {
 				this.scheduleScan();
@@ -394,6 +417,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			window.clearTimeout(timer);
 		}
 		this.propertyLinkTimers.clear();
+		this.pendingPropertyLinks.clear();
+		if (this.propertyFocusTimer !== null) {
+			window.clearTimeout(this.propertyFocusTimer);
+		}
 		this.clearPendingUndo();
 		this.cancelDeferredAutolinks();
 	}
@@ -2346,27 +2373,57 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (!this.settings.propertyLinkOnEdit) return;
 		if (file.extension !== "md") return;
 		if (this.propertyLinkWrites.has(file.path)) return;
+		// Only the note in front of the user. A change arriving from sync or
+		// another plugin must never cascade edits across the vault.
+		if (this.app.workspace.getActiveFile()?.path !== file.path) return;
 
+		this.pendingPropertyLinks.set(file.path, file);
+		this.armPropertyLinkTimer(file);
+	}
+
+	private armPropertyLinkTimer(file: TFile) {
 		const pending = this.propertyLinkTimers.get(file.path);
 		if (pending !== undefined) window.clearTimeout(pending);
 		this.propertyLinkTimers.set(
 			file.path,
 			window.setTimeout(() => {
 				this.propertyLinkTimers.delete(file.path);
-				if (this.isEditingProperties()) return;
+				// Waiting, never dropping: Obsidian saves a property the
+				// moment focus moves to the next field, so the work is
+				// usually queued while the cursor still sits in the panel.
+				if (
+					nextPropertyLinkAction({
+						focusInProperties: this.isEditingProperties(),
+					}) === "wait"
+				) {
+					this.armPropertyLinkTimer(file);
+					return;
+				}
+				this.pendingPropertyLinks.delete(file.path);
 				void this.linkProperties(file, false);
 			}, 400)
 		);
+	}
+
+	// Runs everything queued — used when focus leaves the property panel or
+	// the note is closed, so a finished value does not wait for the timer.
+	private flushPropertyLinks() {
+		if (this.isEditingProperties()) return;
+		for (const [path, file] of [...this.pendingPropertyLinks]) {
+			const timer = this.propertyLinkTimers.get(path);
+			if (timer !== undefined) window.clearTimeout(timer);
+			this.propertyLinkTimers.delete(path);
+			this.pendingPropertyLinks.delete(path);
+			void this.linkProperties(file, false);
+		}
 	}
 
 	// True while the cursor sits in a property field, so a value is never
 	// rewritten out from under the person typing it.
 	private isEditingProperties(): boolean {
 		const active = document.activeElement;
-		return (
-			active instanceof HTMLElement &&
-			active.closest(".metadata-container") !== null
-		);
+		if (!(active instanceof HTMLElement)) return false;
+		return active.closest(".metadata-container, .metadata-property") !== null;
 	}
 
 	private propertyMatcher(selfName: string): PropertyMatcher {
@@ -2445,12 +2502,24 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		// worth opening at all. The values are matched again inside the
 		// callback, which is what actually gets written.
 		const cached = this.app.metadataCache.getFileCache(file)?.frontmatter;
-		const preview = cached
-			? linkFrontmatter(cached, allowed, matcher)
-			: new Map<string, string | string[]>();
+		if (!cached || Object.keys(cached).length === 0) {
+			if (showNotice) {
+				new Notice("Linkosaurus: this note has no properties.");
+			}
+			return;
+		}
+
+		const preview = linkFrontmatter(cached, allowed, matcher);
 		if (preview.size === 0) {
 			if (showNotice) {
-				new Notice("Linkosaurus: no property values to link.");
+				const names = Object.keys(cached).filter((name) =>
+					isLinkableProperty(name, allowed)
+				);
+				new Notice(
+					names.length === 0
+						? "Linkosaurus: none of this note's properties are on the list to link."
+						: "Linkosaurus: no property value matched a note."
+				);
 			}
 			return;
 		}
@@ -2544,6 +2613,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (typeof this.settings.propertyLinkEnabled !== "boolean")
 			this.settings.propertyLinkEnabled = DEFAULT_SETTINGS.propertyLinkEnabled;
 		if (typeof this.settings.propertyLinkFields !== "string")
+			this.settings.propertyLinkFields = DEFAULT_SETTINGS.propertyLinkFields;
+		// 4.3.0 shipped a narrow default list that skipped ordinary property
+		// names. Carrying it exactly means it was never chosen, so it gives
+		// way to "every property"; an edited list is left alone.
+		if (this.settings.propertyLinkFields === LEGACY_PROPERTY_FIELDS)
 			this.settings.propertyLinkFields = DEFAULT_SETTINGS.propertyLinkFields;
 		if (typeof this.settings.propertyLinkOnEdit !== "boolean")
 			this.settings.propertyLinkOnEdit = DEFAULT_SETTINGS.propertyLinkOnEdit;
@@ -3208,7 +3282,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					"Link the text you type into properties like author or publisher. " +
 					"Obsidian's property fields sit outside the editor, so linking " +
 					"happens once you leave the field, not while typing. " +
-					"Example: author: Ocean → author: \"[[Ocean Service Group]]\"",
+					"Example: author: Museum → author: \"[[Museum of Natural History]]\"",
 				aliases: ["properties", "frontmatter", "metadata"],
 				control: {
 					type: "toggle",
@@ -3254,8 +3328,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			{
 				name: "Complete property names",
 				desc:
-					"Let a partly typed value find the note it starts — Ocean finds " +
-					"Ocean Service Group — as long as exactly one note matches.",
+					"Let a partly typed value find the note it starts — Museum finds " +
+					"Museum of Natural History — as long as exactly one note matches.",
 				aliases: ["properties", "prefix"],
 				visible: () => plugin.settings.propertyLinkEnabled,
 				control: {
@@ -3845,7 +3919,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				"Link the text you type into properties like author or publisher. " +
 				"Obsidian's property fields sit outside the editor, so linking " +
 				"happens once you leave the field, not while typing. " +
-				"Example: author: Ocean → author: \"[[Ocean Service Group]]\""
+				"Example: author: Museum → author: \"[[Museum of Natural History]]\""
 			)
 			.addToggle((toggle) => {
 				toggle
@@ -3893,8 +3967,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			new Setting(containerEl)
 				.setName("Complete property names")
 				.setDesc(
-					"Let a partly typed value find the note it starts — Ocean finds " +
-					"Ocean Service Group — as long as exactly one note matches."
+					"Let a partly typed value find the note it starts — Museum finds " +
+					"Museum of Natural History — as long as exactly one note matches."
 				)
 				.addToggle((toggle) => {
 					toggle

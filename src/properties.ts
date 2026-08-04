@@ -24,9 +24,9 @@ export const RESERVED_PROPERTIES = new Set([
 ]);
 
 export interface PropertyCandidate {
-	/** What the user typed, e.g. "Ocean". */
+	/** What the user typed, e.g. "Museum". */
 	keyword: string;
-	/** The note it should point at, e.g. "Ocean Service Group". */
+	/** The note it should point at, e.g. "Museum of Natural History". */
 	target: string;
 }
 
@@ -45,6 +45,26 @@ export interface PropertyMatcher {
 	 */
 	exactKey: (text: string) => string;
 	prefixMatchEnabled: boolean;
+}
+
+/**
+ * The list shipped as the default in 4.3.0. Anyone still carrying it never
+ * chose it, so the migration replaces it with "every property" — the narrow
+ * list meant real vaults (company, attendees, …) linked nothing at all.
+ */
+export const LEGACY_PROPERTY_FIELDS =
+	"author\npublisher\nrelated\ntopic\npeople\nproject";
+
+/**
+ * What to do when a property change has settled. Pending work is never
+ * dropped: while a property field still holds focus the value may still be
+ * mid-edit, so the decision is to wait and ask again — the 4.3.0 bug was
+ * returning here and losing the work for good.
+ */
+export function nextPropertyLinkAction(state: {
+	focusInProperties: boolean;
+}): "link" | "wait" {
+	return state.focusInProperties ? "wait" : "link";
 }
 
 export function parsePropertyList(raw: string): string[] {
@@ -107,7 +127,7 @@ function resolveTarget(
 
 	if (!matcher.prefixMatchEnabled) return undefined;
 
-	// "Ocean" should find "Ocean Service Group" — but only when there is
+	// "Museum" should find "Museum of Natural History" — but only when there is
 	// exactly one candidate. Two notes starting the same way is a coin flip,
 	// and a coin flip has no place rewriting someone's file. Candidates are
 	// counted by their exact spelling, so Zürich and Zurich count as two.

@@ -88,7 +88,7 @@ Plain web addresses become clean Markdown links on their own — and so do email
 - **Separators stay intact** — `T-Rex - Facebook` → `[[T-Rex]] - [[Facebook]]`. The dinosaur keeps its link, the platform gets its own (your T-Rex has social media, no judgement).
 - **It learns your vault** — every note name becomes linkable the moment the note exists; frontmatter `aliases:` too.
 - **Accents optional** — type `Lukasz Nowak` and get `[[Łukasz Nowak]]`, correctly spelled. Works for every Latin-script language, in both directions.
-- **Properties link too** — type `Ocean` into an `author` field and it becomes `[[Ocean Service Group]]` when you leave the field.
+- **Properties link too** — type `Museum` into an `author` field and it becomes `[[Museum of Natural History]]` when you leave the field.
 - **Paste & dictation** — pasted or dictated text arrives pre-linked in a single pass.
 - **Periodic auto-relink** — optionally re-scan your vault on a schedule so old notes catch up with new keywords.
 - **Bulk commands** — link a whole note or the whole vault in one go.
@@ -124,17 +124,17 @@ The display text strips the protocol, `www.`, query string, fragment, and traili
 
 ### Properties
 
-Properties are plain text too, so they get linked as well. Type `Ocean` into an `author` field, leave the field, and it becomes `[[Ocean Service Group]]` — no `[[`, no picker, no remembering the full name.
+Properties are plain text too, so they get linked as well. Type `Museum` into an `author` field, leave the field, and it becomes `[[Museum of Natural History]]` — no `[[`, no picker, no remembering the full name.
 
 | You type in a property | Linkosaurus writes |
 |------------------------|--------------------|
 | `author: Tokyo` | `author: "[[Tokyo]]"` |
-| `author: Ocean` | `author: "[[Ocean Service Group]]"` |
+| `author: Museum` | `author: "[[Museum of Natural History]]"` |
 | `publisher: ML` | `publisher: "[[Machine Learning\|ML]]"` |
 
-A partly typed value completes itself only when exactly one note starts that way — with two `Ocean…` notes in the vault, nothing happens rather than the wrong thing. Whole values are matched, never fragments, so a `description` full of prose is never rewritten. Values that already contain a link are left alone, and `tags`, `aliases` and `cssclasses` are never touched at all.
+A partly typed value completes itself only when exactly one note starts that way — with two `Museum…` notes in the vault, nothing happens rather than the wrong thing. Whole values are matched, never fragments, so a `description` full of prose is never rewritten. Values that already contain a link are left alone, and `tags`, `aliases` and `cssclasses` are never touched at all.
 
-Off by default. Turn on *Link property values*, list the properties you want (or leave the list empty for all of them), and optionally reach for the command **Link property values in current note** to catch up older notes.
+On by default, and deliberately narrow in scope: only the note you have open is ever touched, so a sync or another plugin can never set off a chain of edits. Every property is fair game unless you name the ones you want in the settings. There's also a command, **Link property values in current note**, for catching up older notes.
 
 **One honest limitation:** linking happens when you *leave* the field, not while you type, and there is no suggestion popup inside a property field. Obsidian's property editor is not part of the note editor — plugins never see those keystrokes. For picking a note as you type there, Obsidian's own `[[` remains the way.
 
@@ -247,10 +247,10 @@ Linkosaurus ships with more knobs than most people will ever need — every opti
 | **Auto-link website URLs** | Convert `http(s)://…` and bare domains to Markdown links (on by default) |
 | **URL top-level domains** | TLDs recognised for bare domains (one per line) |
 | **Auto-link email addresses** | Turn typed or pasted addresses into `mailto:` links (on by default) |
-| **Link property values** | Link the text you type into properties (off by default) |
+| **Link property values** | Link the text you type into properties (on by default) |
 | **Properties to link** | Which property names to link (empty = all but `tags`, `aliases`, `cssclasses`) |
 | **Link properties after editing** | Link a value as soon as you leave the field (on by default) |
-| **Complete property names** | Let `Ocean` find `Ocean Service Group` when it is unambiguous (on by default) |
+| **Complete property names** | Let `Museum` find `Museum of Natural History` when it is unambiguous (on by default) |
 
 ## Privacy
 
