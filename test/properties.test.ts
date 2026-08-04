@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-	LEGACY_PROPERTY_FIELDS,
+	SETTINGS_VERSION,
 	isLinkableProperty,
 	linkFrontmatter,
 	linkPropertyValue,
+	migratePropertySettings,
 	nextPropertyLinkAction,
 	parsePropertyList,
 	type PropertyMatcher,
@@ -157,18 +158,45 @@ test("an empty list means every property but the reserved ones", () => {
 	assert.ok(!isLinkableProperty("tags", allowed));
 });
 
-test("the 4.3.0 default list is recognised for migration", () => {
-	assert.deepEqual(parsePropertyList(LEGACY_PROPERTY_FIELDS), [
-		"author",
-		"publisher",
-		"related",
-		"topic",
-		"people",
-		"project",
-	]);
-	// A vault using that list would have skipped ordinary property names.
-	assert.ok(
-		!isLinkableProperty("company", parsePropertyList(LEGACY_PROPERTY_FIELDS))
+test("settings from before the marker are put back to the defaults", () => {
+	// What a vault carries after installing 4.3.0: switched off, narrow list.
+	assert.deepEqual(
+		migratePropertySettings({
+			version: undefined,
+			enabled: false,
+			fields: "author\npublisher\nrelated\ntopic\npeople\nproject",
+		}),
+		{ version: SETTINGS_VERSION, enabled: true, fields: "" }
+	);
+});
+
+test("a hand-edited list from before the marker is normalised too", () => {
+	// It never took effect in 4.3.0, so it is not a choice worth keeping.
+	assert.deepEqual(
+		migratePropertySettings({
+			version: undefined,
+			enabled: false,
+			fields: "company\nattendees",
+		}),
+		{ version: SETTINGS_VERSION, enabled: true, fields: "" }
+	);
+});
+
+test("a choice made after the marker exists is respected", () => {
+	assert.deepEqual(
+		migratePropertySettings({
+			version: SETTINGS_VERSION,
+			enabled: false,
+			fields: "company",
+		}),
+		{ version: SETTINGS_VERSION, enabled: false, fields: "company" }
+	);
+});
+
+test("a fresh install ends up on the defaults with the marker set", () => {
+	assert.deepEqual(
+		migratePropertySettings({ version: 0, enabled: true, fields: "" }),
+		{ version: SETTINGS_VERSION, enabled: true, fields: "" }
 	);
 });
 

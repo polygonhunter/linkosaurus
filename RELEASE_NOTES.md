@@ -1,17 +1,11 @@
-## 🦕 Properties, now actually working
+## 🦕 No settings required
 
-4.3.0 promised that property values would link themselves. In practice they mostly didn't, and that's on me. Three things stood in the way:
+Property linking was supposed to just work after 4.3.1. For anyone who had already installed 4.3.0, it didn't — and the reason is a plain oversight on my part.
 
-- **The work was thrown away.** Obsidian saves a property the moment you move to the *next* field — so the linking was queued while the cursor was still in the property panel, and the check for "is someone typing right now?" answered yes and dropped it. Nothing ever picked it up again. Now it waits instead of giving up, and links as soon as you leave the panel or switch notes.
-- **The default list was too narrow.** It shipped with `author`, `publisher`, `related`, `topic`, `people`, `project` — so real vaults with `company` or `attendees` linked nothing at all. Every property is now fair game (except `tags`, `aliases` and `cssclasses`, which never were). If you still have the old list and never changed it, it's cleared for you; a list you edited yourself stays put.
-- **It was off by default.** Now on, because it can only ever touch the note you have open — a sync or another plugin can't set off a chain of edits across your vault. Not for you? *Settings → Link property values*.
+Saved settings always win over new defaults. Since 4.3.0 shipped the feature switched **off**, every vault that tried it back then carries that "off" in its settings file, and 4.3.1's new default never reached it. The people most likely to want the feature were exactly the ones it stayed broken for.
 
-So the thing from the bug report works now:
+4.3.2 fixes that: settings written before this release get their property options put back to the defaults, once — switched on, every property included. After that, nothing needs touching. Type a value, leave the field, the link is there.
 
-```
-company: Museum   →  leave the field  →  company: "[[Museum of Natural History]]"
-```
-
-The command *Link property values in current note* also explains itself when nothing happens — whether the note has no properties, none of them are on your list, or no value matched a note.
+If you deliberately switch property linking off from now on, it stays off. This is a one-time correction for settings that were saved while the feature never worked.
 
 Happy linking. 🦕

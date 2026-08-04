@@ -134,7 +134,7 @@ Properties are plain text too, so they get linked as well. Type `Museum` into an
 
 A partly typed value completes itself only when exactly one note starts that way — with two `Museum…` notes in the vault, nothing happens rather than the wrong thing. Whole values are matched, never fragments, so a `description` full of prose is never rewritten. Values that already contain a link are left alone, and `tags`, `aliases` and `cssclasses` are never touched at all.
 
-On by default, and deliberately narrow in scope: only the note you have open is ever touched, so a sync or another plugin can never set off a chain of edits. Every property is fair game unless you name the ones you want in the settings. There's also a command, **Link property values in current note**, for catching up older notes.
+Nothing to set up: it's on out of the box and every property counts unless you narrow the list yourself. Scope is deliberately tight — only the note you have open is ever touched, so a sync or another plugin can never set off a chain of edits. There's also a command, **Link property values in current note**, for catching up older notes.
 
 **One honest limitation:** linking happens when you *leave* the field, not while you type, and there is no suggestion popup inside a property field. Obsidian's property editor is not part of the note editor — plugins never see those keystrokes. For picking a note as you type there, Obsidian's own `[[` remains the way.
 

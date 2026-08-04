@@ -40,9 +40,10 @@ import {
 	matchEmailInText,
 } from "./email";
 import {
-	LEGACY_PROPERTY_FIELDS,
+	SETTINGS_VERSION,
 	isLinkableProperty,
 	linkFrontmatter,
+	migratePropertySettings,
 	nextPropertyLinkAction,
 	parsePropertyList,
 	type PropertyMatcher,
@@ -71,6 +72,7 @@ interface AutoLinkSettings {
 	noteSearchTrigger: string;
 	urlAutolinkEnabled: boolean;
 	emailAutolinkEnabled: boolean;
+	settingsVersion: number;
 	propertyLinkEnabled: boolean;
 	propertyLinkFields: string;
 	propertyLinkOnEdit: boolean;
@@ -101,6 +103,7 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	noteSearchTrigger: ";;",
 	urlAutolinkEnabled: true,
 	emailAutolinkEnabled: true,
+	settingsVersion: SETTINGS_VERSION,
 	propertyLinkEnabled: true,
 	propertyLinkFields: "",
 	propertyLinkOnEdit: true,
@@ -2614,11 +2617,24 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.propertyLinkEnabled = DEFAULT_SETTINGS.propertyLinkEnabled;
 		if (typeof this.settings.propertyLinkFields !== "string")
 			this.settings.propertyLinkFields = DEFAULT_SETTINGS.propertyLinkFields;
-		// 4.3.0 shipped a narrow default list that skipped ordinary property
-		// names. Carrying it exactly means it was never chosen, so it gives
-		// way to "every property"; an edited list is left alone.
-		if (this.settings.propertyLinkFields === LEGACY_PROPERTY_FIELDS)
-			this.settings.propertyLinkFields = DEFAULT_SETTINGS.propertyLinkFields;
+
+		// Stored settings win over new defaults, so a vault that installed
+		// 4.3.0 would keep property linking switched off for good. Settings
+		// written before the schema marker are put back to the defaults once.
+		const migrated = migratePropertySettings({
+			version: (loaded as { settingsVersion?: unknown } | null)
+				?.settingsVersion,
+			enabled: this.settings.propertyLinkEnabled,
+			fields: this.settings.propertyLinkFields,
+		});
+		const migrationChanged =
+			migrated.version !== this.settings.settingsVersion ||
+			migrated.enabled !== this.settings.propertyLinkEnabled ||
+			migrated.fields !== this.settings.propertyLinkFields;
+		this.settings.settingsVersion = migrated.version;
+		this.settings.propertyLinkEnabled = migrated.enabled;
+		this.settings.propertyLinkFields = migrated.fields;
+		if (migrationChanged) await this.saveData(this.settings);
 		if (typeof this.settings.propertyLinkOnEdit !== "boolean")
 			this.settings.propertyLinkOnEdit = DEFAULT_SETTINGS.propertyLinkOnEdit;
 		if (typeof this.settings.propertyLinkPrefixMatch !== "boolean")

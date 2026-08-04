@@ -47,13 +47,31 @@ export interface PropertyMatcher {
 	prefixMatchEnabled: boolean;
 }
 
+/** Current settings schema. Raise this when defaults must reach existing vaults. */
+export const SETTINGS_VERSION = 1;
+
 /**
- * The list shipped as the default in 4.3.0. Anyone still carrying it never
- * chose it, so the migration replaces it with "every property" — the narrow
- * list meant real vaults (company, attendees, …) linked nothing at all.
+ * Property linking shipped switched off in 4.3.0 and never worked there or in
+ * 4.3.1, and stored settings win over new defaults — so every vault that
+ * tried it would stay switched off forever. Settings written before this
+ * schema existed therefore get the property options put back to their
+ * defaults, once. A choice made from 4.3.2 on carries the marker and stands.
  */
-export const LEGACY_PROPERTY_FIELDS =
-	"author\npublisher\nrelated\ntopic\npeople\nproject";
+export function migratePropertySettings(stored: {
+	version: unknown;
+	enabled: boolean;
+	fields: string;
+}): { version: number; enabled: boolean; fields: string } {
+	const version = typeof stored.version === "number" ? stored.version : 0;
+	if (version >= SETTINGS_VERSION) {
+		return {
+			version,
+			enabled: stored.enabled,
+			fields: stored.fields,
+		};
+	}
+	return { version: SETTINGS_VERSION, enabled: true, fields: "" };
+}
 
 /**
  * What to do when a property change has settled. Pending work is never
