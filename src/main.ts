@@ -39,6 +39,11 @@ import {
 	matchEmailAtEnd,
 	matchEmailInText,
 } from "./email";
+import {
+	linkFrontmatter,
+	parsePropertyList,
+	type PropertyMatcher,
+} from "./properties";
 
 interface AutoLinkSettings {
 	keywordList: string;
@@ -63,6 +68,10 @@ interface AutoLinkSettings {
 	noteSearchTrigger: string;
 	urlAutolinkEnabled: boolean;
 	emailAutolinkEnabled: boolean;
+	propertyLinkEnabled: boolean;
+	propertyLinkFields: string;
+	propertyLinkOnEdit: boolean;
+	propertyLinkPrefixMatch: boolean;
 	urlAutolinkTlds: string;
 }
 
@@ -89,6 +98,10 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	noteSearchTrigger: ";;",
 	urlAutolinkEnabled: true,
 	emailAutolinkEnabled: true,
+	propertyLinkEnabled: false,
+	propertyLinkFields: "author\npublisher\nrelated\ntopic\npeople\nproject",
+	propertyLinkOnEdit: true,
+	propertyLinkPrefixMatch: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
 
@@ -191,6 +204,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private deferredAutolinks: DeferredAutolink[] = [];
 	private relinkTimer: number | null = null;
 	private relinkDebounceTimer: number | null = null;
+	private propertyLinkTimers = new Map<string, number>();
+	// Files this plugin is currently writing to, so its own frontmatter edit
+	// does not come back through the metadata cache as new work.
+	private propertyLinkWrites = new Set<string>();
 	private relinking = false;
 	private aliasSuggest: AliasTargetSuggest | null = null;
 
@@ -324,6 +341,17 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "link-properties",
+			name: "Link property values in current note",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) void this.linkProperties(file, true);
+				return true;
+			},
+		});
+
 		this.addSettingTab(new AutoLinkSettingTab(this.app, this));
 
 		this.app.workspace.onLayoutReady(() => {
@@ -335,7 +363,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.app.metadataCache.on("resolved", () => this.scheduleScan())
 		);
 		this.registerEvent(
-			this.app.metadataCache.on("changed", () => this.scheduleScan())
+			this.app.metadataCache.on("changed", (file) => {
+				this.scheduleScan();
+				this.schedulePropertyLink(file);
+			})
 		);
 		this.registerEvent(
 			this.app.vault.on("create", () => {
@@ -359,6 +390,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.stopPeriodicRelink();
 		if (this.relinkDebounceTimer !== null) window.clearTimeout(this.relinkDebounceTimer);
+		for (const timer of this.propertyLinkTimers.values()) {
+			window.clearTimeout(timer);
+		}
+		this.propertyLinkTimers.clear();
 		this.clearPendingUndo();
 		this.cancelDeferredAutolinks();
 	}
@@ -2302,6 +2337,170 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			.sort((a, b) => a.localeCompare(b));
 	}
 
+	// Property fields are not part of the editor, so there is no keystroke to
+	// hook: Obsidian saves the note and the metadata cache reports it. The
+	// work is deferred until the field no longer has focus, which is the
+	// moment the value is finished rather than half-typed.
+	private schedulePropertyLink(file: TFile) {
+		if (!this.settings.propertyLinkEnabled) return;
+		if (!this.settings.propertyLinkOnEdit) return;
+		if (file.extension !== "md") return;
+		if (this.propertyLinkWrites.has(file.path)) return;
+
+		const pending = this.propertyLinkTimers.get(file.path);
+		if (pending !== undefined) window.clearTimeout(pending);
+		this.propertyLinkTimers.set(
+			file.path,
+			window.setTimeout(() => {
+				this.propertyLinkTimers.delete(file.path);
+				if (this.isEditingProperties()) return;
+				void this.linkProperties(file, false);
+			}, 400)
+		);
+	}
+
+	// True while the cursor sits in a property field, so a value is never
+	// rewritten out from under the person typing it.
+	private isEditingProperties(): boolean {
+		const active = document.activeElement;
+		return (
+			active instanceof HTMLElement &&
+			active.closest(".metadata-container") !== null
+		);
+	}
+
+	private propertyMatcher(selfName: string): PropertyMatcher {
+		const prefixMatchEnabled = this.settings.propertyLinkPrefixMatch;
+		return {
+			lookup: (value: string) => {
+				const key = this.foldKey(value);
+				const target = this.lookupMap.get(key);
+				if (target === undefined) return undefined;
+				// Two notes folding to the same spelling only match on the
+				// exact one, the same rule the typing path follows so
+				// "Zurich" never links [[Zürich]] when both exist.
+				if (this.ambiguousKeys.has(key)) {
+					const exact = this.normalize(value);
+					return this.entries.find((e) => e.exact === exact)?.target;
+				}
+				return target;
+			},
+			prefixCandidates: (value: string) => {
+				const key = this.foldKey(value);
+				if (!key) return [];
+				const seen = new Set<string>();
+				const out: string[] = [];
+				for (const entry of this.entries) {
+					if (!this.foldKey(entry.keyword).startsWith(key)) continue;
+					const targetKey = this.normalize(entry.target);
+					if (seen.has(targetKey)) continue;
+					seen.add(targetKey);
+					out.push(entry.target);
+				}
+				return out;
+			},
+			selfName,
+			foldKey: (text: string) => this.foldKey(text),
+			exactKey: (text: string) => this.normalize(text),
+			prefixMatchEnabled,
+		};
+	}
+
+	// Frontmatter writing arrived in Obsidian 1.4.4, well after this plugin's
+	// minAppVersion, and so did the property editor this feature exists for.
+	// The guarded lookup keeps the plugin loadable on older versions, where
+	// the feature simply reports itself as unavailable.
+	private frontMatterWriter():
+		| ((
+				file: TFile,
+				fn: (frontmatter: Record<string, unknown>) => void
+		  ) => Promise<void>)
+		| null {
+		const manager = this.app.fileManager as unknown as {
+			processFrontMatter?: (
+				file: TFile,
+				fn: (frontmatter: Record<string, unknown>) => void
+			) => Promise<void>;
+		};
+		return typeof manager.processFrontMatter === "function"
+			? manager.processFrontMatter.bind(manager)
+			: null;
+	}
+
+	async linkProperties(file: TFile, showNotice: boolean): Promise<void> {
+		if (!this.settings.propertyLinkEnabled) {
+			if (showNotice) {
+				new Notice(
+					"Linkosaurus: turn on “Link property values” in settings first."
+				);
+			}
+			return;
+		}
+
+		const allowed = parsePropertyList(this.settings.propertyLinkFields);
+		const matcher = this.propertyMatcher(file.basename);
+
+		// processFrontMatter would add an empty frontmatter block to a note
+		// that has none, so the cached metadata decides whether the file is
+		// worth opening at all. The values are matched again inside the
+		// callback, which is what actually gets written.
+		const cached = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		const preview = cached
+			? linkFrontmatter(cached, allowed, matcher)
+			: new Map<string, string | string[]>();
+		if (preview.size === 0) {
+			if (showNotice) {
+				new Notice("Linkosaurus: no property values to link.");
+			}
+			return;
+		}
+
+		const writeFrontMatter = this.frontMatterWriter();
+		if (!writeFrontMatter) {
+			if (showNotice) {
+				new Notice(
+					"Linkosaurus: linking properties needs Obsidian 1.4.4 or newer."
+				);
+			}
+			return;
+		}
+
+		let changed = 0;
+		this.propertyLinkWrites.add(file.path);
+		try {
+			await writeFrontMatter(
+				file,
+				(frontmatter: Record<string, unknown>) => {
+					const changes = linkFrontmatter(
+						frontmatter,
+						allowed,
+						matcher
+					);
+					for (const [key, value] of changes) {
+						frontmatter[key] = value;
+					}
+					changed = changes.size;
+				}
+			);
+		} catch (error) {
+			console.error("Linkosaurus: could not update properties", error);
+			if (showNotice) {
+				new Notice("Linkosaurus: could not update the properties.");
+			}
+			this.propertyLinkWrites.delete(file.path);
+			return;
+		}
+
+		// The write comes back through the metadata cache; ignore that echo.
+		window.setTimeout(() => this.propertyLinkWrites.delete(file.path), 1000);
+
+		if (showNotice && changed > 0) {
+			new Notice(
+				`Linkosaurus: linked ${changed} propert${changed === 1 ? "y" : "ies"}.`
+			);
+		}
+	}
+
 	debouncedSave() {
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.saveTimer = window.setTimeout(() => {
@@ -2342,6 +2541,14 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
 		if (typeof this.settings.emailAutolinkEnabled !== "boolean")
 			this.settings.emailAutolinkEnabled = DEFAULT_SETTINGS.emailAutolinkEnabled;
+		if (typeof this.settings.propertyLinkEnabled !== "boolean")
+			this.settings.propertyLinkEnabled = DEFAULT_SETTINGS.propertyLinkEnabled;
+		if (typeof this.settings.propertyLinkFields !== "string")
+			this.settings.propertyLinkFields = DEFAULT_SETTINGS.propertyLinkFields;
+		if (typeof this.settings.propertyLinkOnEdit !== "boolean")
+			this.settings.propertyLinkOnEdit = DEFAULT_SETTINGS.propertyLinkOnEdit;
+		if (typeof this.settings.propertyLinkPrefixMatch !== "boolean")
+			this.settings.propertyLinkPrefixMatch = DEFAULT_SETTINGS.propertyLinkPrefixMatch;
 		if (typeof this.settings.urlAutolinkTlds !== "string")
 			this.settings.urlAutolinkTlds = DEFAULT_SETTINGS.urlAutolinkTlds;
 		if (typeof this.settings.foldDiacritics !== "boolean")
@@ -2996,6 +3203,68 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				},
 			},
 			{
+				name: "Link property values",
+				desc:
+					"Link the text you type into properties like author or publisher. " +
+					"Obsidian's property fields sit outside the editor, so linking " +
+					"happens once you leave the field, not while typing. " +
+					"Example: author: Ocean → author: \"[[Ocean Service Group]]\"",
+				aliases: ["properties", "frontmatter", "metadata"],
+				control: {
+					type: "toggle",
+					key: "propertyLinkEnabled",
+					defaultValue: DEFAULT_SETTINGS.propertyLinkEnabled,
+				},
+			},
+			{
+				name: "Properties to link",
+				desc:
+					"Property names to link, one per line. Leave empty for all of them. " +
+					"Tags, aliases and cssclasses are never touched.",
+				aliases: ["properties"],
+				visible: () => plugin.settings.propertyLinkEnabled,
+				render: (setting: Setting) =>
+					monoTextArea(setting, {
+						name: "Properties to link",
+						desc:
+							"Property names to link, one per line. Leave empty for all of them. " +
+							"Tags, aliases and cssclasses are never touched.",
+						rows: 6,
+						placeholder: "author\npublisher\nrelated",
+						value: () => plugin.settings.propertyLinkFields,
+						onChange: (value) => {
+							plugin.settings.propertyLinkFields = value;
+							plugin.debouncedSave();
+						},
+					}),
+			},
+			{
+				name: "Link properties after editing",
+				desc:
+					"Link a value as soon as you leave the property field. " +
+					"Turn off to link only through the command.",
+				aliases: ["properties"],
+				visible: () => plugin.settings.propertyLinkEnabled,
+				control: {
+					type: "toggle",
+					key: "propertyLinkOnEdit",
+					defaultValue: DEFAULT_SETTINGS.propertyLinkOnEdit,
+				},
+			},
+			{
+				name: "Complete property names",
+				desc:
+					"Let a partly typed value find the note it starts — Ocean finds " +
+					"Ocean Service Group — as long as exactly one note matches.",
+				aliases: ["properties", "prefix"],
+				visible: () => plugin.settings.propertyLinkEnabled,
+				control: {
+					type: "toggle",
+					key: "propertyLinkPrefixMatch",
+					defaultValue: DEFAULT_SETTINGS.propertyLinkPrefixMatch,
+				},
+			},
+			{
 				name: "Auto-detected keywords",
 				searchable: false,
 				visible: vaultScanOn,
@@ -3053,6 +3322,7 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			case "urlAutolinkEnabled":
 			case "foldDiacritics":
 			case "foldLanguageMode":
+			case "propertyLinkEnabled":
 				await this.plugin.saveSettings();
 				this.refreshDefinitions();
 				return;
@@ -3568,5 +3838,72 @@ class AutoLinkSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		new Setting(containerEl)
+			.setName("Link property values")
+			.setDesc(
+				"Link the text you type into properties like author or publisher. " +
+				"Obsidian's property fields sit outside the editor, so linking " +
+				"happens once you leave the field, not while typing. " +
+				"Example: author: Ocean → author: \"[[Ocean Service Group]]\""
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.propertyLinkEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.propertyLinkEnabled = value;
+						await this.plugin.saveSettings();
+						this.renderLegacy();
+					});
+			});
+
+		if (this.plugin.settings.propertyLinkEnabled) {
+			new Setting(containerEl)
+				.setName("Properties to link")
+				.setDesc(
+					"Property names to link, one per line. Leave empty for all of them. " +
+					"Tags, aliases and cssclasses are never touched."
+				)
+				.setClass("linkosaurus-textarea-mono")
+				.addTextArea((text) => {
+					text.inputEl.rows = 6;
+					text.setPlaceholder("author\npublisher\nrelated")
+						.setValue(this.plugin.settings.propertyLinkFields)
+						.onChange((value) => {
+							this.plugin.settings.propertyLinkFields = value;
+							this.plugin.debouncedSave();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Link properties after editing")
+				.setDesc(
+					"Link a value as soon as you leave the property field. " +
+					"Turn off to link only through the command."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.propertyLinkOnEdit)
+						.onChange(async (value) => {
+							this.plugin.settings.propertyLinkOnEdit = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Complete property names")
+				.setDesc(
+					"Let a partly typed value find the note it starts — Ocean finds " +
+					"Ocean Service Group — as long as exactly one note matches."
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(this.plugin.settings.propertyLinkPrefixMatch)
+						.onChange(async (value) => {
+							this.plugin.settings.propertyLinkPrefixMatch = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
 	}
 }

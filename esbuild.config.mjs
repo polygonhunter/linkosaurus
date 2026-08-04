@@ -16,7 +16,7 @@ const prod = (mode === "production");
 // test framework to the dependency tree.
 if (mode === "test") {
 	await esbuild.build({
-		entryPoints: ["test/fold.test.ts", "test/email.test.ts"],
+		entryPoints: ["test/fold.test.ts", "test/email.test.ts", "test/properties.test.ts"],
 		bundle: true,
 		external: builtinModules.flatMap((m) => [m, `node:${m}`]),
 		format: "esm",
