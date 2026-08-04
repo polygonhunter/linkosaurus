@@ -33,6 +33,12 @@ import {
 	toSrcIndex,
 	type FoldTable,
 } from "./fold";
+import {
+	formatEmailAsMarkdownLink,
+	isEmailBoundary,
+	matchEmailAtEnd,
+	matchEmailInText,
+} from "./email";
 
 interface AutoLinkSettings {
 	keywordList: string;
@@ -56,6 +62,7 @@ interface AutoLinkSettings {
 	noteSearchEnabled: boolean;
 	noteSearchTrigger: string;
 	urlAutolinkEnabled: boolean;
+	emailAutolinkEnabled: boolean;
 	urlAutolinkTlds: string;
 }
 
@@ -81,6 +88,7 @@ const DEFAULT_SETTINGS: AutoLinkSettings = {
 	noteSearchEnabled: true,
 	noteSearchTrigger: ";;",
 	urlAutolinkEnabled: true,
+	emailAutolinkEnabled: true,
 	urlAutolinkTlds: "de\ncom\norg\nnet\nio\nshop\napp\ndev",
 };
 
@@ -612,6 +620,25 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		)
 			return false;
 
+		// Before the URL matcher: an address ends in a domain, so whichever
+		// runs first wins the overlap.
+		if (this.settings.emailAutolinkEnabled) {
+			const emailMatch = matchEmailAtEnd(textBefore);
+			if (emailMatch) {
+				const absStart = line.from + emailMatch.start;
+				const insert =
+					formatEmailAsMarkdownLink(emailMatch.address) + trailing;
+				this.dispatchAutolink(
+					view,
+					absStart,
+					replaceEnd,
+					insert,
+					preserveCursor
+				);
+				return true;
+			}
+		}
+
 		const urlMatch = this.matchUrlAtEnd(textBefore);
 		if (urlMatch) {
 			const absStart = line.from + urlMatch.start;
@@ -941,6 +968,15 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}
 			const atStartBoundary =
 				!prevChar || !/[\p{L}\p{N}]/u.test(prevChar);
+
+			if (atStartBoundary && this.settings.emailAutolinkEnabled) {
+				const email = matchEmailInText(text, i, prevChar);
+				if (email) {
+					result.push(formatEmailAsMarkdownLink(email.address));
+					i = email.end;
+					continue;
+				}
+			}
 
 			if (atStartBoundary) {
 				const bareUrl = this.matchUrlInText(text, i, prevChar);
@@ -1545,6 +1581,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			if (boundary === "(" || boundary === "[") return null;
 		}
 
+		// "@" is not a URL character, so the backwards scan stops inside an
+		// email address and would otherwise link its domain on its own. This
+		// guard holds whether or not email linking is enabled.
+		if (isEmailBoundary(textBefore, start)) return null;
+
 		const candidate = textBefore.substring(start);
 
 		if (/^https?:\/\//i.test(candidate)) {
@@ -1604,6 +1645,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		if (prevChar && /[\p{L}\p{N}]/u.test(prevChar)) return null;
+		// Same guard as the typing path: never link the domain half of an
+		// email address as if it stood alone.
+		if (isEmailBoundary(text, i)) return null;
 
 		const firstCh = text.charAt(i);
 		if (!/[a-zA-Z0-9]/.test(firstCh)) return null;
@@ -2296,6 +2340,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			this.settings.noteSearchTrigger = DEFAULT_SETTINGS.noteSearchTrigger;
 		if (typeof this.settings.urlAutolinkEnabled !== "boolean")
 			this.settings.urlAutolinkEnabled = DEFAULT_SETTINGS.urlAutolinkEnabled;
+		if (typeof this.settings.emailAutolinkEnabled !== "boolean")
+			this.settings.emailAutolinkEnabled = DEFAULT_SETTINGS.emailAutolinkEnabled;
 		if (typeof this.settings.urlAutolinkTlds !== "string")
 			this.settings.urlAutolinkTlds = DEFAULT_SETTINGS.urlAutolinkTlds;
 		if (typeof this.settings.foldDiacritics !== "boolean")
@@ -2938,6 +2984,18 @@ class AutoLinkSettingTab extends PluginSettingTab {
 					}),
 			},
 			{
+				name: "Auto-link email addresses",
+				desc:
+					"Turn typed or pasted email addresses into mailto links. " +
+					"Example: team@example.com → [team@example.com](mailto:team@example.com)",
+				aliases: ["email", "mail", "mailto"],
+				control: {
+					type: "toggle",
+					key: "emailAutolinkEnabled",
+					defaultValue: DEFAULT_SETTINGS.emailAutolinkEnabled,
+				},
+			},
+			{
 				name: "Auto-detected keywords",
 				searchable: false,
 				visible: vaultScanOn,
@@ -3495,5 +3553,20 @@ class AutoLinkSettingTab extends PluginSettingTab {
 
 			this.buildVaultDetails(containerEl);
 		}
+
+		new Setting(containerEl)
+			.setName("Auto-link email addresses")
+			.setDesc(
+				"Turn typed or pasted email addresses into mailto links. " +
+				"Example: team@example.com → [team@example.com](mailto:team@example.com)"
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.emailAutolinkEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.emailAutolinkEnabled = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 }

@@ -71,15 +71,16 @@ Some notes can't be reached by typing alone — `T-Rex - Feeding Schedule` never
 
 One keypress replaces the whole search — trigger and all — with `[[T-Rex - Feeding Schedule]]`. Too lazy to type the full name? `;;feed` gets you there too. It's fuzzy.
 
-### 🌐 URLs tidy themselves
+### 🌐 URLs and emails tidy themselves
 
-Plain web addresses become clean Markdown links on their own:
+Plain web addresses become clean Markdown links on their own — and so do email addresses:
 
 | You type | Linkosaurus writes |
 |----------|--------------------|
 | `https://www.github.com` | `[github.com](https://www.github.com)` |
 | `github.com` | `[github.com](https://github.com)` |
 | `https://shop.example.com/p?id=1` | `[shop.example.com/p](https://shop.example.com/p?id=1)` |
+| `team@example.com` | `[team@example.com](mailto:team@example.com)` |
 
 ### 🧠 And it thinks ahead
 
@@ -119,6 +120,10 @@ The search only starts when you mean it: the trigger does nothing mid-word, doub
 ### URL linking, in full
 
 The display text strips the protocol, `www.`, query string, fragment, and trailing slash; the link target keeps the full URL. Bare domains are only linked when their top-level domain is in your allowlist (defaults: `de com org net io shop app dev` — editable). Toggleable.
+
+### Email linking, in full
+
+Addresses keep their full spelling as the link text: `team@example.com ` becomes `[team@example.com](mailto:team@example.com)`, ready to click. Unlike bare domains there is no allowlist to maintain — the `@` is signal enough, so `name@company.fr` links just like `.com` does. A sentence-ending `.` `,` `!` `?` stays outside the link, and addresses that already live inside a link, a `mailto:` target, or a URL like `https://user@host.com` are left alone. Toggleable — and with the toggle off, addresses stay plain text, untouched.
 
 ### Frontmatter aliases
 
@@ -224,6 +229,7 @@ Linkosaurus ships with more knobs than most people will ever need — every opti
 | **Relink interval (minutes)** | How often to scan (1–60 minutes, default 5) |
 | **Auto-link website URLs** | Convert `http(s)://…` and bare domains to Markdown links (on by default) |
 | **URL top-level domains** | TLDs recognised for bare domains (one per line) |
+| **Auto-link email addresses** | Turn typed or pasted addresses into `mailto:` links (on by default) |
 
 ## Privacy
 

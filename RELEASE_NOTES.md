@@ -1,9 +1,25 @@
-## 🦕 Housekeeping
+## 🦕 Mail gets the same treatment
 
-A tidy-up pass after the plugin review — nothing you'll notice while writing, everything you'd want in the foundations.
+URLs have been linking themselves for a while. Now email addresses do too.
 
-- **Cleaner regex.** The ASCII fast-path check now uses `\p{ASCII}` instead of a control-character range. Same behaviour, no more raised eyebrows from linters.
-- **Honest TypeScript config.** The project declared an older standard library than the code actually used, which made a handful of correctly-typed lines look unsafe to any tooling that didn't share our exact setup. The config now matches the build target.
-- **No deprecated API calls.** The settings tab still renders the old way on Obsidian below 1.13 — that fallback just refreshes itself directly now, instead of going through an API Obsidian has since retired.
+```
+Write to team@example.com  →  Write to [team@example.com](mailto:team@example.com)
+```
 
-Linking, aliases, the `;;` search, and accent matching all behave exactly as before. Happy linking. 🦕
+Type an address, hit space — it becomes a clickable `mailto:` link with the address still spelled out in full. Pasted text gets the same pass.
+
+- **No allowlist to maintain.** Bare web domains need their TLD on a list; addresses don't. The `@` is signal enough, so `name@company.fr` links exactly like `.com` does.
+- **Good manners.** A sentence-ending `.` or `,` stays outside the link. Addresses already inside a link, a `mailto:` target, or a URL like `https://user@host.com` are left alone.
+- **One toggle**, on by default: *Settings → Auto-link email addresses*.
+
+### 🐛 And a fix worth having
+
+Addresses used to get mangled. Because `@` is not a URL character, the URL matcher scanned backwards into an address and linked the domain half on its own:
+
+```
+Write to team@example.com  →  Write to team@[example.com](https://example.com)
+```
+
+That's gone — addresses are now recognised as addresses, and with email linking switched off they stay plain text instead of being broken apart.
+
+Happy linking. 🦕

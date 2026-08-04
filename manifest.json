@@ -1,9 +1,9 @@
 {
 	"id": "autolink-keywords",
 	"name": "Linkosaurus",
-	"version": "4.1.1",
+	"version": "4.2.0",
 	"minAppVersion": "0.15.0",
-	"description": "Links notes as you type — keywords become wikilinks the moment you finish a word. Inline aliases with autocomplete, a quick note search, and automatic URL links. Fully offline, desktop and mobile.",
+	"description": "Links notes as you type — keywords become wikilinks the moment you finish a word. Inline aliases with autocomplete, a quick note search, and automatic links for URLs and email addresses. Fully offline, desktop and mobile.",
 	"author": "polygonhunter",
 	"isDesktopOnly": false
 }
