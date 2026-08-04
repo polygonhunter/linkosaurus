@@ -85,6 +85,59 @@ export function nextPropertyLinkAction(state: {
 	return state.focusInProperties ? "wait" : "link";
 }
 
+/**
+ * Finds the note-search trigger inside a property field's value. Obsidian's
+ * property editor is not the markdown editor, so the popup there is driven by
+ * the whole field value rather than by cursor position: everything after the
+ * last trigger is the search, spaces included.
+ */
+export function matchPropertySearchTrigger(
+	value: string,
+	trigger: string
+): { query: string } | null {
+	if (!trigger) return null;
+	const idx = value.lastIndexOf(trigger);
+	if (idx === -1) return null;
+
+	const before = idx > 0 ? value.charAt(idx - 1) : "";
+	if (/[\p{L}\p{N}]/u.test(before)) return null;
+	if (before === trigger.charAt(0)) return null;
+
+	const query = value.substring(idx + trigger.length);
+	if (/^\s/.test(query)) return null;
+	if (query.includes("[[")) return null;
+
+	return { query };
+}
+
+/**
+ * True for the editable element inside a property's value cell. Obsidian's
+ * property markup is not part of the public API, so this stays a plain
+ * structural test: no match simply means no popup.
+ */
+export function isPropertyValueField(el: {
+	isContentEditable?: boolean;
+	tagName?: string;
+	getAttribute?: (name: string) => string | null;
+	closest?: (selector: string) => unknown;
+}): boolean {
+	if (!el.closest?.(".metadata-property-value")) return false;
+	if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return true;
+	if (el.isContentEditable) return true;
+	return el.getAttribute?.("contenteditable") === "true";
+}
+
+/** The finished value a picked suggestion writes into the property. */
+export function propertyLinkFromEntry(
+	keyword: string,
+	target: string,
+	foldKey: (text: string) => string
+): string {
+	return foldKey(keyword) === foldKey(target)
+		? `[[${target}]]`
+		: `[[${target}|${keyword}]]`;
+}
+
 export function parsePropertyList(raw: string): string[] {
 	const out: string[] = [];
 	for (const line of raw.split("\n")) {

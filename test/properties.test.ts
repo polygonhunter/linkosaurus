@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import {
 	SETTINGS_VERSION,
 	isLinkableProperty,
+	isPropertyValueField,
 	linkFrontmatter,
 	linkPropertyValue,
+	matchPropertySearchTrigger,
 	migratePropertySettings,
 	nextPropertyLinkAction,
 	parsePropertyList,
+	propertyLinkFromEntry,
 	type PropertyMatcher,
 } from "../src/properties";
 
@@ -137,6 +140,91 @@ test("an explicit list narrows which properties are touched", () => {
 	assert.ok(isLinkableProperty("author", ["author", "publisher"]));
 	assert.ok(!isLinkableProperty("status", ["author", "publisher"]));
 	assert.ok(!isLinkableProperty("tags", ["tags"]));
+});
+
+// Mirrors Obsidian's property markup: an editable element inside the value
+// cell qualifies, anything else does not. Verified against the real DOM in a
+// browser; these stubs keep it that way.
+function fieldStub(opts: {
+	inValueCell: boolean;
+	tagName?: string;
+	contentEditable?: boolean;
+}) {
+	return {
+		tagName: opts.tagName ?? "DIV",
+		isContentEditable: opts.contentEditable ?? false,
+		getAttribute: (name: string) =>
+			name === "contenteditable" && opts.contentEditable ? "true" : null,
+		closest: (selector: string) =>
+			selector === ".metadata-property-value" && opts.inValueCell
+				? {}
+				: null,
+	};
+}
+
+test("recognises the editable part of a property value", () => {
+	// Text property: contenteditable div in the value cell.
+	assert.ok(
+		isPropertyValueField(
+			fieldStub({ inValueCell: true, contentEditable: true })
+		)
+	);
+	// Date and number properties use plain inputs.
+	assert.ok(
+		isPropertyValueField(fieldStub({ inValueCell: true, tagName: "INPUT" }))
+	);
+});
+
+test("ignores anything outside a property value", () => {
+	// The note editor — the existing popup already covers it.
+	assert.ok(
+		!isPropertyValueField(
+			fieldStub({ inValueCell: false, contentEditable: true })
+		)
+	);
+	// The property *name* field must keep its own suggestions.
+	assert.ok(
+		!isPropertyValueField(fieldStub({ inValueCell: false, tagName: "INPUT" }))
+	);
+	// A non-editable element inside the value cell (the rendered link).
+	assert.ok(!isPropertyValueField(fieldStub({ inValueCell: true })));
+});
+
+test("finds the search trigger in a property value", () => {
+	assert.deepEqual(matchPropertySearchTrigger(";;", ";;"), { query: "" });
+	assert.deepEqual(matchPropertySearchTrigger(";;Tok", ";;"), { query: "Tok" });
+	// Spaces belong to the search, as in the note body.
+	assert.deepEqual(matchPropertySearchTrigger(";;Museum of", ";;"), {
+		query: "Museum of",
+	});
+});
+
+test("the trigger stays inert where it is ordinary text", () => {
+	assert.equal(matchPropertySearchTrigger("", ";;"), null);
+	assert.equal(matchPropertySearchTrigger("Tokyo", ";;"), null);
+	// Mid-word, tripled, or followed by a space.
+	assert.equal(matchPropertySearchTrigger("a;;b", ";;"), null);
+	assert.equal(matchPropertySearchTrigger(";;; ", ";;"), null);
+	assert.equal(matchPropertySearchTrigger(";; Tok", ";;"), null);
+	// Obsidian's own link picker owns this one.
+	assert.equal(matchPropertySearchTrigger(";;[[Tok", ";;"), null);
+});
+
+test("a custom trigger is honoured", () => {
+	assert.deepEqual(matchPropertySearchTrigger("*Tok", "*"), { query: "Tok" });
+	assert.equal(matchPropertySearchTrigger(";;Tok", "*"), null);
+});
+
+test("a picked suggestion writes the mapping-aware link", () => {
+	const fold = (t: string) => t.toLowerCase();
+	assert.equal(
+		propertyLinkFromEntry("Tokyo", "Tokyo", fold),
+		"[[Tokyo]]"
+	);
+	assert.equal(
+		propertyLinkFromEntry("ML", "Machine Learning", fold),
+		"[[Machine Learning|ML]]"
+	);
 });
 
 test("waits while a property field still has focus, never drops the work", () => {

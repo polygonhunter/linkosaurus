@@ -17,6 +17,7 @@ import {
 	type SettingDefinitionItem,
 	type TFile,
 } from "obsidian";
+import * as obsidian from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, type ChangeDesc } from "@codemirror/state";
@@ -42,10 +43,13 @@ import {
 import {
 	SETTINGS_VERSION,
 	isLinkableProperty,
+	isPropertyValueField,
 	linkFrontmatter,
+	matchPropertySearchTrigger,
 	migratePropertySettings,
 	nextPropertyLinkAction,
 	parsePropertyList,
+	propertyLinkFromEntry,
 	type PropertyMatcher,
 } from "./properties";
 
@@ -212,6 +216,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private relinkDebounceTimer: number | null = null;
 	private propertyLinkTimers = new Map<string, number>();
 	private pendingPropertyLinks = new Map<string, TFile>();
+	// Fields that already carry a suggestion popup. Weak so the entries go
+	// away with the elements when a note closes.
+	private propertySuggestFields = new WeakSet<HTMLElement>();
 	private propertyFocusTimer: number | null = null;
 	// Files this plugin is currently writing to, so its own frontmatter edit
 	// does not come back through the metadata cache as new work.
@@ -385,6 +392,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("delete", () => this.scheduleScan())
 		);
+		// Entering a property field is where the popup gets attached — the
+		// fields are created and destroyed as notes open, so there is nothing
+		// stable to hook at load time.
+		this.registerDomEvent(document, "focusin", (evt: FocusEvent) => {
+			this.attachPropertySuggest(evt.target);
+		});
 		// Leaving the property panel is the moment a value is finished, and
 		// switching notes is the last chance to catch one.
 		this.registerDomEvent(document, "focusout", () => {
@@ -2367,6 +2380,28 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			.sort((a, b) => a.localeCompare(b));
 	}
 
+	// Gives a focused property value field its own suggestion popup. The
+	// element lookup is the one part not covered by the public API, so it
+	// stays defensive: no match simply means no popup, never an error.
+	private attachPropertySuggest(target: EventTarget | null) {
+		if (!this.settings.noteSearchEnabled) return;
+		if (!(target instanceof HTMLElement)) return;
+		if (this.propertySuggestFields.has(target)) return;
+		if (!isPropertyValueField(target)) return;
+
+		const Suggest = getPropertySuggestCtor();
+		if (!Suggest) return;
+
+		this.propertySuggestFields.add(target);
+		new Suggest(this.app, this, target as HTMLInputElement | HTMLDivElement);
+		const key = target
+			.closest(".metadata-property")
+			?.getAttribute("data-property-key");
+		console.debug(
+			`Linkosaurus: suggestions attached to property ${key ?? "(unknown)"}`
+		);
+	}
+
 	// Property fields are not part of the editor, so there is no keystroke to
 	// hook: Obsidian saves the note and the metadata cache reports it. The
 	// work is deferred until the field no longer has focus, which is the
@@ -2673,6 +2708,131 @@ interface AliasSuggestion {
 }
 
 type SuggestMode = "alias" | "search";
+
+// The suggestion popup for property fields, built the first time one is
+// focused rather than at load time. Its base class arrived in Obsidian
+// 1.4.10, well after this plugin's minAppVersion, and a class extending a
+// missing base would fail while the plugin loads — taking everything else
+// with it. Older versions have no property editor to begin with, so they
+// simply never get here.
+interface InputSuggestInstance {
+	limit: number;
+	setValue(value: string): void;
+	close(): void;
+}
+
+type PropertySuggestCtor = new (
+	app: App,
+	plugin: AutoLinkKeywordsPlugin,
+	field: HTMLInputElement | HTMLDivElement
+) => InputSuggestInstance;
+
+let propertySuggestCtor: PropertySuggestCtor | null | undefined;
+
+function getPropertySuggestCtor(): PropertySuggestCtor | null {
+	if (propertySuggestCtor !== undefined) return propertySuggestCtor;
+
+	const api = obsidian as unknown as Record<string, unknown>;
+	const Base = api.AbstractInputSuggest as
+		| (new (
+				app: App,
+				el: HTMLInputElement | HTMLDivElement
+		  ) => InputSuggestInstance)
+		| undefined;
+	if (typeof Base !== "function") {
+		propertySuggestCtor = null;
+		return null;
+	}
+
+	class PropertyValueSuggest extends Base {
+	private plugin: AutoLinkKeywordsPlugin;
+	private field: HTMLElement;
+
+	constructor(
+		app: App,
+		plugin: AutoLinkKeywordsPlugin,
+		field: HTMLInputElement | HTMLDivElement
+	) {
+		super(app, field);
+		this.plugin = plugin;
+		this.field = field;
+		this.limit = 12;
+	}
+
+	protected getSuggestions(query: string): AliasSuggestion[] {
+		if (!this.plugin.settings.noteSearchEnabled) return [];
+
+		const trigger = matchPropertySearchTrigger(
+			query,
+			this.plugin.settings.noteSearchTrigger
+		);
+		if (!trigger) return [];
+
+		const suggestions = this.plugin.getAliasSuggestions(
+			trigger.query,
+			this.plugin.app.workspace.getActiveFile()
+		);
+		console.debug(
+			`Linkosaurus: property search "${trigger.query}" → ${suggestions.length} match(es)`
+		);
+		return suggestions.slice(0, this.limit);
+	}
+
+	renderSuggestion(suggestion: AliasSuggestion, el: HTMLElement): void {
+		el.addClass("linkosaurus-suggest-item");
+
+		const chip = el.createDiv({ cls: "linkosaurus-suggest-chip" });
+		setIcon(chip, "link");
+
+		const body = el.createDiv({ cls: "linkosaurus-suggest-body" });
+		const title = body.createDiv({ cls: "linkosaurus-suggest-title" });
+		if (suggestion.match) {
+			renderMatches(
+				title,
+				suggestion.entry.keyword,
+				suggestion.match.matches
+			);
+		} else {
+			title.setText(suggestion.entry.keyword);
+		}
+		if (suggestion.entry.target !== suggestion.entry.keyword) {
+			body.createDiv({
+				cls: "linkosaurus-suggest-sub",
+				text: `→ ${suggestion.entry.target}`,
+			});
+		}
+	}
+
+	selectSuggestion(suggestion: AliasSuggestion): void {
+		const value = propertyLinkFromEntry(
+			sanitize(suggestion.entry.keyword),
+			sanitize(suggestion.entry.target),
+			(text) => this.plugin.foldKey(text)
+		);
+
+		this.setValue(value);
+		// setValue writes the element; Obsidian only takes the value into its
+		// own property model when the field reports an edit.
+		this.field.dispatchEvent(new Event("input", { bubbles: true }));
+		// Multi-select properties (list type) turn the text into a pill on
+		// Enter — without it the value would sit there uncommitted.
+		if (this.field.closest(".multi-select-container")) {
+			this.field.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key: "Enter",
+					code: "Enter",
+					bubbles: true,
+				})
+			);
+		}
+		console.debug(`Linkosaurus: property value set to ${value}`);
+		this.close();
+	}
+	}
+
+	propertySuggestCtor = PropertyValueSuggest;
+	return propertySuggestCtor;
+}
 
 class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 	private plugin: AutoLinkKeywordsPlugin;
@@ -3296,8 +3456,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 				name: "Link property values",
 				desc:
 					"Link the text you type into properties like author or publisher. " +
-					"Obsidian's property fields sit outside the editor, so linking " +
-					"happens once you leave the field, not while typing. " +
+					"Type the search trigger there for the suggestion popup, or " +
+					"just write the name and leave the field. " +
 					"Example: author: Museum → author: \"[[Museum of Natural History]]\"",
 				aliases: ["properties", "frontmatter", "metadata"],
 				control: {
@@ -3933,8 +4093,8 @@ class AutoLinkSettingTab extends PluginSettingTab {
 			.setName("Link property values")
 			.setDesc(
 				"Link the text you type into properties like author or publisher. " +
-				"Obsidian's property fields sit outside the editor, so linking " +
-				"happens once you leave the field, not while typing. " +
+				"Type the search trigger there for the suggestion popup, or " +
+				"just write the name and leave the field. " +
 				"Example: author: Museum → author: \"[[Museum of Natural History]]\""
 			)
 			.addToggle((toggle) => {

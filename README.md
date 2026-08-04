@@ -88,7 +88,7 @@ Plain web addresses become clean Markdown links on their own — and so do email
 - **Separators stay intact** — `T-Rex - Facebook` → `[[T-Rex]] - [[Facebook]]`. The dinosaur keeps its link, the platform gets its own (your T-Rex has social media, no judgement).
 - **It learns your vault** — every note name becomes linkable the moment the note exists; frontmatter `aliases:` too.
 - **Accents optional** — type `Lukasz Nowak` and get `[[Łukasz Nowak]]`, correctly spelled. Works for every Latin-script language, in both directions.
-- **Properties link too** — type `Museum` into an `author` field and it becomes `[[Museum of Natural History]]` when you leave the field.
+- **Properties link too** — type `;;` in a property field for the search popup, or just write the name and leave the field.
 - **Paste & dictation** — pasted or dictated text arrives pre-linked in a single pass.
 - **Periodic auto-relink** — optionally re-scan your vault on a schedule so old notes catch up with new keywords.
 - **Bulk commands** — link a whole note or the whole vault in one go.
@@ -136,7 +136,16 @@ A partly typed value completes itself only when exactly one note starts that way
 
 Nothing to set up: it's on out of the box and every property counts unless you narrow the list yourself. Scope is deliberately tight — only the note you have open is ever touched, so a sync or another plugin can never set off a chain of edits. There's also a command, **Link property values in current note**, for catching up older notes.
 
-**One honest limitation:** linking happens when you *leave* the field, not while you type, and there is no suggestion popup inside a property field. Obsidian's property editor is not part of the note editor — plugins never see those keystrokes. For picking a note as you type there, Obsidian's own `[[` remains the way.
+**And the search works there too.** Type `;;` in any property field and the same popup appears, filtering as you go:
+
+```
+company: ;;Mus▌
+┌────────────────────────────────┐
+│ 🔗 Museum of Natural History   │
+└────────────────────────────────┘
+```
+
+Pick one and the finished link lands in the field. Same trigger, same fuzzy matching, same keys as in the note body.
 
 ### Email linking, in full
 
