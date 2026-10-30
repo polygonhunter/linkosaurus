@@ -91,3 +91,5 @@ export const editorInfoField = StateField.define<{ file: unknown } | null>({
 	create: () => null,
 	update: (value) => value,
 });
+
+export class MarkdownView {}

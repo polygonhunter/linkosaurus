@@ -12,7 +12,7 @@
 	font-family: var(--font-monospace);
 }
 
-.linkosaurus-input-error input {
+.setting-item input.linkosaurus-input-error {
 	border-color: var(--text-error);
 }
 

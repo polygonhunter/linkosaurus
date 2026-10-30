@@ -17,6 +17,9 @@
 const MARK = /\p{M}/u;
 const MARK_G = /\p{M}/gu;
 const ASCII_ONLY = /^\p{ASCII}*$/u;
+// Folding is for Latin-script letters. In other scripts the marks are part
+// of the letter: ガ is not カ, का is not क.
+const LATIN = /^\p{Script=Latin}/u;
 
 // Letters with no canonical decomposition: stripping combining marks does
 // nothing for these, so they are spelled out.
@@ -273,7 +276,7 @@ function foldCluster(cluster: Cluster, table: FoldTable, raw: string): string {
 	if (!table.enabled) return table.lowercase ? raw.toLowerCase() : raw;
 
 	const key = foldKey(cluster.composed);
-	if (table.allow && !table.allow.has(key)) {
+	if (table.allow ? !table.allow.has(key) : !LATIN.test(key)) {
 		return table.lowercase ? raw.toLowerCase() : raw;
 	}
 

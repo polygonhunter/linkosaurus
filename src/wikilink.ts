@@ -1,8 +1,14 @@
 // Building wikilinks from keywords and targets. Free of any Obsidian import
 // so it can be unit tested on its own.
 
-// Wikilink syntax that must never appear inside either half of a link.
-function stripLinkSyntax(text: string): string {
+/**
+ * Removes the wikilink syntax that must never appear inside either half of
+ * a link. Everything else stays: the target keeps "/" (folder paths), "#"
+ * (headings) and "^" (blocks), so a manual mapping like
+ * "ML = AI/Machine Learning#Basics" links exactly where it says, and the
+ * display text keeps "C#" or "1/2" as the user wrote them.
+ */
+export function sanitizeTarget(text: string): string {
 	return (
 		text
 			.replace(/\]\]|\[\[|[|\n\r\0]/g, "")
@@ -11,22 +17,8 @@ function stripLinkSyntax(text: string): string {
 	);
 }
 
-/**
- * The target half of a link. Keeps "/" (folder paths), "#" (headings) and
- * "^" (blocks), so a manual mapping like "ML = AI/Machine Learning#Basics"
- * links exactly where it says.
- */
-export function sanitizeTarget(text: string): string {
-	return stripLinkSyntax(text);
-}
-
-/**
- * The display half of a link. Only the characters that would break the link
- * itself are removed — "C#" or "1/2" stay what the user wrote.
- */
-export function sanitizeDisplay(text: string): string {
-	return stripLinkSyntax(text);
-}
+/** The display half of a link; the same rule as the target half. */
+export const sanitizeDisplay = sanitizeTarget;
 
 /**
  * The note a keyword names when it is its own target ("C#", "TCP/IP"

@@ -35,6 +35,9 @@ if [ "$CONFIRM" != "j" ]; then
 fi
 
 echo ""
+echo "  → Tests ausführen..."
+npm test
+
 echo "  → Plugin bauen..."
 npm run build
 

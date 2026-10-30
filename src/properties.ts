@@ -14,6 +14,8 @@
 // This module is deliberately free of any Obsidian import so it can be unit
 // tested on its own.
 
+import { isWordChar } from "./skip";
+
 export const RESERVED_PROPERTIES = new Set([
 	"tags",
 	"tag",
@@ -166,7 +168,7 @@ export function matchPropertySearchTrigger(
 	if (idx === -1) return null;
 
 	const before = idx > 0 ? value.charAt(idx - 1) : "";
-	if (/[\p{L}\p{N}\p{M}]/u.test(before)) return null;
+	if (isWordChar(before)) return null;
 	if (before === trigger.charAt(0)) return null;
 
 	const query = value.substring(idx + trigger.length);

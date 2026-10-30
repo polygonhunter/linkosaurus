@@ -5,11 +5,13 @@ import {
 	Setting,
 	Notice,
 	EditorSuggest,
+	MarkdownView,
 	Modal,
 	prepareFuzzySearch,
 	renderMatches,
 	setIcon,
 	type Editor,
+	type EditorChange,
 	type EditorPosition,
 	type EditorSuggestContext,
 	type EditorSuggestTriggerInfo,
@@ -83,8 +85,12 @@ import {
 } from "./wikilink";
 import {
 	endsInHashtag,
+	endsInUrl,
 	frontmatterCloseLine,
 	frontmatterEnd,
+	isReferenceDefinition,
+	isWordChar,
+	skipAutolink,
 	skipCalloutType,
 	skipComment,
 	skipDisplayMath,
@@ -93,6 +99,8 @@ import {
 	skipInlineCode,
 	skipInlineMath,
 	skipHtml,
+	skipReferenceDefinition,
+	skipUrlLike,
 } from "./skip";
 
 interface AutoLinkSettings {
@@ -199,6 +207,32 @@ function historyIsolation(): Annotation<"full"> | undefined {
 	}
 }
 
+// setCssStyles arrived in Obsidian 1.2, after this plugin's minAppVersion;
+// older versions get the same styles set directly.
+function setStyles(el: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
+	if (typeof el.setCssStyles === "function") el.setCssStyles(styles);
+	else Object.assign(el.style, styles);
+}
+
+// A note's frontmatter aliases. Only text and numbers count — an empty list
+// item ("aliases:\n  - ") arrives as null and must not become the keyword
+// "null".
+function frontmatterAliases(fm: Record<string, unknown>): string[] {
+	const raw: unknown = fm.aliases ?? fm.alias;
+	const list: unknown[] = Array.isArray(raw)
+		? raw
+		: typeof raw === "string"
+			? [raw]
+			: [];
+	const out: string[] = [];
+	for (const alias of list) {
+		if (typeof alias === "string" || typeof alias === "number") {
+			out.push(String(alias));
+		}
+	}
+	return out;
+}
+
 interface RelinkPlanItem {
 	file: TFile;
 	before: string;
@@ -225,6 +259,13 @@ interface PendingUndo {
 	typedText: string;
 	matchedKeywordNorm: string;
 	timer: number;
+	// The character typed after the keyword: " " while waiting for a longer
+	// keyword ("Open" → "Open Source"), or "." ":" "?" while waiting to see
+	// whether the word goes on ("Node.js", "github.com").
+	trigger: string;
+	// Where the link and its trigger end; a punctuation undo only applies
+	// when typing continues right there.
+	end: number;
 }
 
 // Snapshot of the text a link replaced, kept briefly so stale IME/autocorrect
@@ -437,6 +478,16 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					);
 				}
 
+				// The keyword becomes one line of the keyword list, where a
+				// line break, "=" (the mapping separator) or a leading "#" (a
+				// comment) would turn it into something else.
+				if (/[\n=]/.test(text) || text.trim().startsWith("#")) {
+					new Notice(
+						"Linkosaurus: a keyword cannot contain line breaks or “=”, or start with “#”."
+					);
+					return;
+				}
+
 				const cursor = editor.getCursor("from");
 				const lineText = editor.getLine(cursor.line);
 				const before = lineText.substring(0, cursor.ch);
@@ -458,7 +509,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		this.addCommand({
 			id: "autolink-current-note",
 			name: "Auto-link keywords in current note",
-			editorCallback: (editor) => {
+			editorCallback: (editor, ctx) => {
 				const content = editor.getValue();
 				if (content.length > 100000) {
 					new Notice(
@@ -466,7 +517,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					);
 					return;
 				}
-				const file = this.app.workspace.getActiveFile();
+				// The note behind this editor — in a hover preview or on a
+				// canvas that is not the active one.
+				const file = ctx.file ?? this.app.workspace.getActiveFile();
 				if (!this.allowsLinksIn(file)) {
 					new Notice(
 						"Linkosaurus: this note is excluded from linking (folder or linkosaurus: false)."
@@ -484,13 +537,20 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					new Notice("No keywords found to link.");
 					return;
 				}
-				const lastLine = editor.lastLine();
-				const lastCh = editor.getLine(lastLine).length;
-				editor.replaceRange(
-					replaced,
-					{ line: 0, ch: 0 },
-					{ line: lastLine, ch: lastCh }
-				);
+				// Only the changed stretch of each line is replaced, so the
+				// cursor, scroll position and folds stay where they were.
+				const changes = AutoLinkKeywordsPlugin.lineEdits(content, replaced);
+				if (changes) {
+					editor.transaction({ changes });
+				} else {
+					const lastLine = editor.lastLine();
+					const lastCh = editor.getLine(lastLine).length;
+					editor.replaceRange(
+						replaced,
+						{ line: 0, ch: 0 },
+						{ line: lastLine, ch: lastCh }
+					);
+				}
 				new Notice("Keywords auto-linked.");
 			},
 		});
@@ -652,6 +712,36 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		void this.saveSettings();
 	}
 
+	// The edits that turn `before` into `after`, one per changed line and
+	// limited to the part of the line that differs. Linking never adds or
+	// removes a line break; null when the line counts differ anyway.
+	static lineEdits(before: string, after: string): EditorChange[] | null {
+		const oldLines = before.split("\n");
+		const newLines = after.split("\n");
+		if (oldLines.length !== newLines.length) return null;
+		const changes: EditorChange[] = [];
+		oldLines.forEach((oldLine, line) => {
+			const newLine = newLines[line]!;
+			if (oldLine === newLine) return;
+			const max = Math.min(oldLine.length, newLine.length);
+			let head = 0;
+			while (head < max && oldLine.charAt(head) === newLine.charAt(head)) head++;
+			let tail = 0;
+			while (
+				tail < max - head &&
+				oldLine.charAt(oldLine.length - 1 - tail) ===
+					newLine.charAt(newLine.length - 1 - tail)
+			)
+				tail++;
+			changes.push({
+				from: { line, ch: head },
+				to: { line, ch: oldLine.length - tail },
+				text: newLine.substring(head, newLine.length - tail),
+			});
+		});
+		return changes;
+	}
+
 	private normalize(text: string): string {
 		return this.settings.caseInsensitive ? text.toLowerCase() : text;
 	}
@@ -744,6 +834,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		text: string
 	): boolean {
 		if (!text) return false;
+		// With several cursors the default input goes to all of them; a
+		// dispatch of ours would only serve the main one and collapse the rest.
+		if (view.state.selection.ranges.length > 1) return false;
 
 		// Mobile keyboards (IME/autocorrect) sometimes re-commit the word they
 		// just finished, using coordinates from before our link dispatch
@@ -814,13 +907,18 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (from !== to) return false;
 
 		if (this.pendingUndo) {
-			if (/^\s+$/.test(text)) return false;
+			if (/^\s+$/.test(text)) {
+				// After "Berlin." a space ends the sentence; only the wait
+				// for a longer multi-word keyword goes on across it.
+				if (this.pendingUndo.trigger !== " ") this.clearPendingUndo();
+				return false;
+			}
 			// A keyword only grows into a longer one across word characters
 			// (e.g. "Open" → "Open Source"). Any non-word character — sentence
 			// punctuation or a separator like "-" in "T-Rex - Facebook" — ends
 			// the current keyword, so keep the link that was already created
 			// instead of undoing it.
-			if (!/[\p{L}\p{N}\p{M}]/u.test(text)) {
+			if (!isWordChar(text)) {
 				this.clearPendingUndo();
 				return false;
 			}
@@ -874,7 +972,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		}
 
 		const sel = view.state.selection.main;
-		if (!sel.empty) return false;
+		if (!sel.empty || view.state.selection.ranges.length > 1) return false;
 
 		if (this.isImeActive(view)) {
 			this.scheduleDeferredAutolink(
@@ -975,6 +1073,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const sel = view.state.selection.main;
 		const end = rec.from + rec.insert.length;
 		if (!sel.empty || sel.head !== end) return false;
+		if (view.state.selection.ranges.length > 1) return false;
 		if (view.state.doc.sliceString(rec.from, end) !== rec.insert) return false;
 
 		// The trigger character typed after the word (space, punctuation)
@@ -1014,7 +1113,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		if (!textBefore.length) return false;
 		if (this.isInCodeContext(view, pos, line.text, colOffset)) return false;
 		if (!this.activeFileAllowsLinks(view)) return false;
-		if (this.isInsideWikilink(textBefore)) return false;
+		if (this.isInsideLink(textBefore)) return false;
+		// A link reference definition keeps its bare destination.
+		if (isReferenceDefinition(textBefore)) return false;
 		// An active note search owns its query: spaces and punctuation are
 		// part of what the user is filtering for, so the auto-linker must not
 		// grab words out of it (it would inject [[..]] into the query and
@@ -1025,14 +1126,25 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		)
 			return false;
 
+		// Addresses link only once the word is over (space, Enter): "." ":"
+		// and "?" also occur inside them, and "https://www.github." is not
+		// an address yet. Closing punctuation typed before the space stays
+		// outside the link.
+		const wordDone = trailing === "" || /\s$/.test(trailing);
+		const tail = wordDone ? /[.,;:!?)]*$/.exec(textBefore)![0] : "";
+		const core = textBefore.substring(0, textBefore.length - tail.length);
+
 		// Before the URL matcher: an address ends in a domain, so whichever
 		// runs first wins the overlap.
-		if (this.settings.emailAutolinkEnabled) {
-			const emailMatch = matchEmailAtEnd(textBefore);
+		if (wordDone && this.settings.emailAutolinkEnabled) {
+			const emailMatch = matchEmailAtEnd(core);
 			if (emailMatch) {
 				const absStart = line.from + emailMatch.start;
 				const insert =
-					formatEmailAsMarkdownLink(emailMatch.address) + trailing;
+					formatEmailAsMarkdownLink(emailMatch.address) +
+					core.substring(emailMatch.start + emailMatch.address.length) +
+					tail +
+					trailing;
 				return this.dispatchAutolink(
 					view,
 					absStart,
@@ -1044,11 +1156,11 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}
 		}
 
-		const urlMatch = this.matchUrlAtEnd(textBefore);
+		const urlMatch = wordDone ? this.matchUrlAtEnd(core) : null;
 		if (urlMatch) {
 			const absStart = line.from + urlMatch.start;
 			const insert =
-				this.formatUrlAsMarkdownLink(urlMatch.url) + trailing;
+				this.formatUrlAsMarkdownLink(urlMatch.url) + tail + trailing;
 			return this.dispatchAutolink(
 				view,
 				absStart,
@@ -1058,6 +1170,9 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				{ matchEnd: pos, trailing }
 			);
 		}
+
+		// Part of an address that is not linked as one: no keyword inside it.
+		if (endsInUrl(textBefore)) return false;
 
 		const alias = this.matchAlias(textBefore);
 		if (alias) {
@@ -1099,24 +1214,29 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			)
 				return false;
 
-			if (setupPendingUndo) {
-				const kwNorm = this.foldKey(direct.keyword);
-				// Every folded spelling counts: with the Scandinavian pack on,
-				// "Soeren Kierkegaard" must still be seen as a longer match
-				// after [[Søren]] has fired.
-				const hasLonger = this.growPrefixes.has(kwNorm);
-				if (hasLonger) {
-					this.clearPendingUndo();
-					this.pendingUndo = {
-						from: absStart,
-						typedText: direct.typedText,
-						matchedKeywordNorm: kwNorm,
-						timer: window.setTimeout(
-							() => (this.pendingUndo = null),
-							5000
-						),
-					};
-				}
+			const kwNorm = this.foldKey(direct.keyword);
+			// Every folded spelling counts: with the Scandinavian pack on,
+			// "Soeren Kierkegaard" must still be seen as a longer match
+			// after [[Søren]] has fired.
+			const waitsForLonger =
+				setupPendingUndo && this.growPrefixes.has(kwNorm);
+			// "Node." may go on as "Node.js": a letter or digit typed right
+			// after the "." takes the link back.
+			const waitsForWord =
+				!preserveCursor && trailing.length === 1 && ".:?".includes(trailing);
+			if (waitsForLonger || waitsForWord) {
+				this.clearPendingUndo();
+				this.pendingUndo = {
+					from: absStart,
+					typedText: direct.typedText,
+					matchedKeywordNorm: kwNorm,
+					timer: window.setTimeout(
+						() => (this.pendingUndo = null),
+						5000
+					),
+					trigger: waitsForLonger ? " " : trailing,
+					end: absStart + insert.length,
+				};
 			}
 
 			return true;
@@ -1159,7 +1279,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			return false;
 
 		const textBefore = line.text.substring(0, colOffset);
-		if (this.isInsideWikilink(textBefore)) return false;
+		if (this.isInsideLink(textBefore)) return false;
 
 		const charBefore =
 			from > 0 ? state.doc.sliceString(from - 1, from) : "";
@@ -1200,9 +1320,20 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	private handlePaste(event: ClipboardEvent, view: EditorView): boolean {
 		const text = event.clipboardData?.getData("text/plain");
 		if (!text || text.length > 10000) return false;
+		// Rich text is Obsidian's to convert to Markdown; taking the plain
+		// text instead would drop its headings, lists and links.
+		if (Array.from(event.clipboardData?.types ?? []).includes("text/html"))
+			return false;
 		// URLs and email addresses link without any keyword.
 		if (!this.hasBulkWork()) return false;
 		if (!this.activeFileAllowsLinks(view)) return false;
+		if (view.state.selection.ranges.length > 1) return false;
+		// A URL pasted over selected text is Obsidian's own [selection](url).
+		if (
+			!view.state.selection.main.empty &&
+			/^\s*[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+\s*$/.test(text)
+		)
+			return false;
 
 		const state = view.state;
 		const { from, to } = state.selection.main;
@@ -1211,7 +1342,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 
 		if (this.isInCodeContext(view, from, line.text, colOffset)) return false;
 		const textBefore = line.text.substring(0, colOffset);
-		if (this.isInsideWikilink(textBefore)) return false;
+		if (this.isInsideLink(textBefore)) return false;
 
 		const file = this.fileOfView(view);
 		const selfName = file?.basename ?? "";
@@ -1321,13 +1452,23 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}
 
 			const ch = text.charAt(i);
-			if (ch === "<" && skipRegion(skipHtml(text, i, charBefore))) continue;
+			if (
+				ch === "<" &&
+				(skipRegion(skipAutolink(text, i)) ||
+					skipRegion(skipHtml(text, i, charBefore)))
+			)
+				continue;
 			if (ch === "%" && skipRegion(skipComment(text, i))) continue;
 			if (ch === "$") {
 				if (skipRegion(skipDisplayMath(text, i))) continue;
 				if (skipRegion(skipInlineMath(text, i))) continue;
 			}
-			if (ch === "[" && skipRegion(skipCalloutType(text, i))) continue;
+			if (
+				ch === "[" &&
+				(skipRegion(skipReferenceDefinition(text, i, charBefore)) ||
+					skipRegion(skipCalloutType(text, i)))
+			)
+				continue;
 			if (
 				ch === "#" &&
 				skipRegion(
@@ -1399,8 +1540,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 					prevChar = text.charAt(i - 1);
 				}
 			}
-			const atStartBoundary =
-				!prevChar || !/[\p{L}\p{N}\p{M}]/u.test(prevChar);
+			const atStartBoundary = !isWordChar(prevChar);
 
 			if (atStartBoundary && this.settings.emailAutolinkEnabled) {
 				const email = matchEmailInText(text, i, prevChar);
@@ -1422,7 +1562,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 				}
 			}
 
-			if (atStartBoundary) {
+			// An address that was not linked as one (URL linking off, or a
+			// top-level domain not on the list) stays whole.
+			if (atStartBoundary && skipRegion(skipUrlLike(text, i))) continue;
+
+			// "[^Berlin]" is a footnote label and "^Berlin" a block id.
+			if (atStartBoundary && prevChar !== "^") {
 				let matched = false;
 				// i is a raw character boundary, so the folded index it maps
 				// to is a fold boundary by construction — only the end of a
@@ -1453,11 +1598,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 						endPos < text.length
 							? text.charAt(endPos)
 							: charAfter;
-					if (
-						nextChar &&
-						/[\p{L}\p{N}\p{M}]/u.test(nextChar)
-					)
-						continue;
+					if (isWordChar(nextChar)) continue;
 
 					const link = formatWikilink(entry.keyword, entry.target);
 					if (!link) continue;
@@ -1493,6 +1634,19 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		) {
 			this.clearPendingUndo();
 			return false;
+		}
+
+		if (pending.trigger !== " ") {
+			// "Node." + "j": the word goes on, so the link was premature —
+			// but only when typing continues right behind the ".".
+			this.clearPendingUndo();
+			if (from !== pending.end) return false;
+			const restore = pending.typedText + pending.trigger + text;
+			view.dispatch({
+				changes: { from: pending.from, to: from, insert: restore },
+				selection: { anchor: pending.from + restore.length },
+			});
+			return true;
 		}
 
 		const firstChar = text.charAt(0);
@@ -1702,7 +1856,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const colOffset = d.from - line.from;
 		if (this.isInCodeContext(d.view, d.from, line.text, colOffset))
 			return;
-		if (this.isInsideWikilink(line.text.substring(0, colOffset))) return;
+		if (this.isInsideLink(line.text.substring(0, colOffset))) return;
 		if (!this.activeFileAllowsLinks(d.view)) return;
 
 		const file = this.fileOfView(d.view);
@@ -2050,6 +2204,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 						: "Linkosaurus: No keywords found to link."
 				);
 			}
+		} catch (error) {
+			// Runs from a timer: a note deleted mid-scan must not surface as
+			// an unhandled rejection. The next run starts over.
+			console.error("Linkosaurus: periodic relink failed", error);
 		} finally {
 			this.relinking = false;
 		}
@@ -2106,7 +2264,10 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			}).open();
 		} catch (error) {
 			release();
-			throw error;
+			// Called without awaiting: an error rethrown here would only be
+			// an unhandled rejection.
+			console.error("Linkosaurus: could not check the notes", error);
+			new Notice("Linkosaurus: could not check the notes.");
 		}
 	}
 
@@ -2227,10 +2388,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const cache = this.app.metadataCache.getFileCache(file);
 		const parts: string[] = [file.basename];
 		if (this.settings.scanFrontmatterAliases && cache?.frontmatter) {
-			const fm = cache.frontmatter as Record<string, unknown>;
-			const raw: unknown = fm.aliases ?? fm.alias;
-			if (Array.isArray(raw)) parts.push(...raw.map((a) => String(a)));
-			else if (typeof raw === "string") parts.push(raw);
+			parts.push(...frontmatterAliases(cache.frontmatter));
 		}
 		parts.push("\u0001");
 		if (cache?.links) {
@@ -2284,15 +2442,8 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const cache = this.app.metadataCache.getFileCache(file);
 
 			if (this.settings.scanFrontmatterAliases && cache?.frontmatter) {
-				const fm = cache.frontmatter as Record<string, unknown>;
-				const raw: unknown = fm.aliases ?? fm.alias;
-				const aliasList: unknown[] = Array.isArray(raw)
-					? raw
-					: typeof raw === "string"
-						? [raw]
-						: [];
-				for (const alias of aliasList) {
-					const a = String(alias).trim();
+				for (const alias of frontmatterAliases(cache.frontmatter)) {
+					const a = alias.trim();
 					if (!a) continue;
 					const aNorm = this.normalize(a);
 					if (
@@ -2472,14 +2623,17 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			text.substring(i, i + 8).toLowerCase() === "https://";
 
 		if (isProtocol) {
+			// Ends at whitespace, at Markdown or HTML that closes around the
+			// address (**…**, "…", <…>, `…`, […]) and at a ")" that has no
+			// "(" inside the URL — Wikipedia's "Foo_(bar)" keeps its own.
 			let end = i;
-			while (
-				end < text.length &&
-				!/\s/.test(text.charAt(end)) &&
-				text.charAt(end) !== ")" &&
-				text.charAt(end) !== "]"
-			)
-				end++;
+			let parens = 0;
+			for (; end < text.length; end++) {
+				const c = text.charAt(end);
+				if (/[\s<>"`*\]]/.test(c)) break;
+				if (c === "(") parens++;
+				else if (c === ")" && parens-- === 0) break;
+			}
 			let url = text.substring(i, end);
 			while (url.length > 0 && /[.,;:!?]/.test(url.charAt(url.length - 1))) {
 				url = url.substring(0, url.length - 1);
@@ -2495,7 +2649,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			return { url, end };
 		}
 
-		if (prevChar && /[\p{L}\p{N}\p{M}]/u.test(prevChar)) return null;
+		if (isWordChar(prevChar)) return null;
 		// Same guard as the typing path: never link the domain half of an
 		// email address as if it stood alone.
 		if (isEmailBoundary(text, i)) return null;
@@ -2712,6 +2866,23 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		return lastOpen > lastClose;
 	}
 
+	// Inside a Markdown link that is still being typed — its text
+	// "[Berlin and …" or its destination "](https://…/Berlin". The syntax
+	// tree only knows the link once it is closed.
+	private isInsideMarkdownLink(textBefore: string): boolean {
+		const dest = textBefore.lastIndexOf("](");
+		if (dest !== -1 && textBefore.indexOf(")", dest + 2) === -1) return true;
+		const open = textBefore.lastIndexOf("[");
+		return open !== -1 && textBefore.indexOf("]", open) === -1;
+	}
+
+	private isInsideLink(textBefore: string): boolean {
+		return (
+			this.isInsideWikilink(textBefore) ||
+			this.isInsideMarkdownLink(textBefore)
+		);
+	}
+
 	// Longer delimiter first, so a triple-slash input is never claimed by the
 	// double-slash rule when one delimiter is a substring of the other.
 	private aliasChecks(): { kind: "single" | "multi"; delim: string }[] {
@@ -2759,7 +2930,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const preceding = textBefore.substring(0, idx);
 		let displayStart = 0;
 		for (let j = preceding.length - 1; j >= 0; j--) {
-			if (!/[\p{L}\p{N}\p{M}]/u.test(preceding.charAt(j))) {
+			if (!isWordChar(preceding.charAt(j))) {
 				displayStart = j + 1;
 				break;
 			}
@@ -2831,7 +3002,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const preceding = textBefore.substring(0, idx);
 		let displayStart = 0;
 		for (let j = preceding.length - 1; j >= 0; j--) {
-			if (!/[\p{L}\p{N}\p{M}]/u.test(preceding.charAt(j))) {
+			if (!isWordChar(preceding.charAt(j))) {
 				displayStart = j + 1;
 				break;
 			}
@@ -2881,7 +3052,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		const idx = textBefore.lastIndexOf(trigger);
 		if (idx === -1) return null;
 		const before = idx > 0 ? textBefore.charAt(idx - 1) : "";
-		if (/[\p{L}\p{N}\p{M}]/u.test(before)) return null;
+		if (isWordChar(before)) return null;
 		if (before === trigger.charAt(0)) return null;
 
 		const query = textBefore.substring(idx + trigger.length);
@@ -3136,7 +3307,7 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 		delim: string,
 		skipNorm?: string
 	): { replacement: string; end: number } | null {
-		if (pos > 0 && /[\p{L}\p{N}\p{M}]/u.test(text.charAt(pos - 1))) return null;
+		if (pos > 0 && isWordChar(text.charAt(pos - 1))) return null;
 
 		const spaceAfterWord = text.indexOf(delim, pos);
 		if (spaceAfterWord === -1 || spaceAfterWord === pos) return null;
@@ -3236,10 +3407,12 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 			const start = cut + toSrcIndex(folded, foldedStart);
 			if (start > 0) {
 				const ch = textBefore.charAt(start - 1);
-				if (/[\p{L}\p{N}\p{M}]/u.test(ch)) continue;
+				if (isWordChar(ch)) continue;
 			}
 			// "#Berlin" is a tag, not a mention of the note Berlin.
 			if (endsInHashtag(textBefore.substring(0, start))) continue;
+			// "^Berlin" is a block id, "[^Berlin" a footnote label.
+			if (textBefore.charAt(start - 1) === "^") continue;
 			if (textBefore.substring(start, start + 2) === "[[") continue;
 			if (
 				start >= 2 &&
@@ -3374,9 +3547,23 @@ export default class AutoLinkKeywordsPlugin extends Plugin {
 	// True while the cursor sits in a property field, so a value is never
 	// rewritten out from under the person typing it.
 	private isEditingProperties(): boolean {
+		if (this.isEditingFrontmatterText()) return true;
 		const active = document.activeElement;
 		if (!(active instanceof HTMLElement)) return false;
 		return active.closest(".metadata-container, .metadata-property") !== null;
+	}
+
+	// The same for properties edited as YAML (source mode, or properties
+	// shown as source): the focused editor's cursor sits in the frontmatter.
+	private isEditingFrontmatterText(): boolean {
+		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+		if (!editor || !editor.hasFocus()) return false;
+		const close = frontmatterCloseLine(
+			(n) => editor.getLine(n - 1),
+			editor.lineCount()
+		);
+		// close is 1-based, cursor lines 0-based: the closing "---" counts.
+		return close !== -1 && editor.getCursor().line < close;
 	}
 
 	private propertyMatcher(selfName: string): PropertyMatcher {
@@ -4038,6 +4225,9 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 	}
 
 	private installPill(): void {
+		// open() can run again while the popup is up; never stack a second
+		// pill and observer on the first.
+		this.removePill();
 		const popover = this.popoverEl();
 		if (!popover) return;
 		popover.addClass("linkosaurus-alias-suggest");
@@ -4066,10 +4256,10 @@ class AliasTargetSuggest extends EditorSuggest<AliasSuggestion> {
 
 		const selected = list.querySelector(".suggestion-item.is-selected");
 		if (!(selected instanceof HTMLElement)) {
-			this.pill.setCssStyles({ opacity: "0" });
+			setStyles(this.pill, { opacity: "0" });
 			return;
 		}
-		this.pill.setCssStyles({
+		setStyles(this.pill, {
 			opacity: "1",
 			transform: `translateY(${selected.offsetTop}px)`,
 			height: `${selected.offsetHeight}px`,

@@ -240,3 +240,67 @@ export function skipHtml(text: string, i: number, charBefore = ""): number {
 	}
 	return tagEnd;
 }
+
+/**
+ * An autolink <https://…> or <name@host> starting at `i`. Its content is
+ * already a link; wrapping it in another one breaks both.
+ */
+export function skipAutolink(text: string, i: number): number {
+	if (text.charAt(i) !== "<") return -1;
+	const m =
+		/^<(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>]+)>/.exec(
+			text.substring(i, i + 2000)
+		);
+	return m ? i + m[0].length : -1;
+}
+
+// A link reference definition, "[label]: https://…" — its target must stay
+// a bare destination or every [text][label] using it breaks. Footnote
+// definitions ("[^1]: …") hold prose and are not matched.
+const REFERENCE_DEFINITION = /^[ \t>]*\[(?!\^)[^\]\n]+\]:(?:[ \t]|$)/;
+
+/** True when a line (or the start of one) is a link reference definition. */
+export function isReferenceDefinition(lineText: string): boolean {
+	return REFERENCE_DEFINITION.test(lineText);
+}
+
+/**
+ * A link reference definition starting at `i` (its "["): returns the end of
+ * its line, which is left as it is.
+ */
+export function skipReferenceDefinition(
+	text: string,
+	i: number,
+	charBefore = ""
+): number {
+	if (text.charAt(i) !== "[" || !isAtLineStart(text, i, charBefore)) return -1;
+	const lineEnd = text.indexOf("\n", i);
+	const line = text.substring(i, lineEnd === -1 ? text.length : lineEnd);
+	if (!isReferenceDefinition(line)) return -1;
+	return lineEnd === -1 ? text.length : lineEnd;
+}
+
+// "scheme://…" or "domain.tld/…": text that is part of an address, whether
+// or not it is linked as one.
+const URL_LIKE = /^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\/)/;
+
+/**
+ * A URL-like run starting at `i` that was not turned into a link (URL
+ * linking off, or a top-level domain not on the list). Returns its end, so
+ * no keyword is linked out of the middle of an address.
+ */
+export function skipUrlLike(text: string, i: number): number {
+	if (!URL_LIKE.test(text.substring(i, i + 300))) return -1;
+	let end = i;
+	while (end < text.length && !/[\s<>"`[\]]/.test(text.charAt(end))) end++;
+	return end;
+}
+
+/**
+ * True when the text before the cursor ends inside a URL-like run, so a
+ * keyword typed there belongs to the address ("https://x.de/Berlin").
+ */
+export function endsInUrl(textBefore: string): boolean {
+	const token = /[^\s<>"`[\]()]*$/.exec(textBefore)?.[0] ?? "";
+	return token.includes("://") || URL_LIKE.test(token);
+}
